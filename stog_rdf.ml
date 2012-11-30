@@ -1,5 +1,5 @@
 (**************************************************************************)
-(*              Stog                                                      *)
+(*              Stog-RDF                                                  *)
 (*                                                                        *)
 (*  Copyright (C) 2012 Maxence Guesdon. All rights reserved.              *)
 (*                                                                        *)
