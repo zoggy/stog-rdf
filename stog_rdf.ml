@@ -41,7 +41,8 @@
 let file = "graph.rdf";;
 let namespaces stog =
   [ Rdf_uri.uri stog.Stog_types.stog_base_url, "site" ;
-    Rdf_uri.uri "http://www.w3.org/1999/02/22-rdf-syntax-ns#", "rdf" ;
+    Rdf_rdf.rdf_ "", "rdf" ;
+    Rdf_uri.uri "http://toto.com/dump.rdf#", "toto";
   ]
 ;;
 
@@ -72,6 +73,33 @@ let build_ns_map namespaces =
   List.fold_left f Rdf_uri.Urimap.empty namespaces
 ;;
 
+let apply_namespaces =
+  let map_qn ns = function
+    ("",s) ->  ("",s)
+  | (pref, s) ->
+      try
+        let p = Rdf_xml.SMap.find pref ns in
+        (Rdf_uri.string p, s)
+      with Not_found ->
+          (pref, s)
+  in
+  let rec iter ns xml =
+    match xml with
+      Rdf_xml.D _ -> xml
+    | Rdf_xml.E ((tag,atts),subs) ->
+       let tag = map_qn ns tag in
+       let atts = List.map (fun (qn,v) -> (map_qn ns qn, v)) atts in
+       let subs = List.map (iter ns) subs in
+       Rdf_xml.E ((tag, atts), subs)
+  in
+  fun ns xml ->
+    let ns = Rdf_uri.Urimap.fold
+      (fun uri pref map -> Rdf_xml.SMap.add pref uri map)
+       ns Rdf_xml.SMap.empty
+    in
+    iter ns xml
+;;
+
 let graph = ref None;;
 let set_graph x = graph := Some x;;
 let graph () =
@@ -90,16 +118,17 @@ let graph () =
       (g, gstate)
 ;;
 
-let tag_of_string s =
-  try
+let tag_of_string s = ("", s)
+(*  try
     let len = String.length s in
     let p = String.index s ':' in
     if len > p then
-      (String.sub s 0 p, String.sub s (p+1) (len - p - 1))
+      ((String.sub s 0 p)^":", String.sub s (p+1) (len - p - 1))
     else
       ("", String.sub s 0 p)
   with Not_found -> ("",s)
 ;;
+*)
 
 let get_rdf_resource stog env atts =
   try
@@ -134,10 +163,25 @@ let rec map_to_rdf_xml_tree = function
     Rdf_xml.E (t, subs)
 ;;
 
+let rec map_to_xml_tree = function
+  Rdf_xml.D s -> Xtmpl.D s
+| Rdf_xml.E (t,subs) ->
+    let subs = List.map map_to_xml_tree subs in
+    Xtmpl.E (t, subs)
+;;
+
+let prerr_atts l =
+  prerr_endline "attributes:";
+  List.iter
+  (fun ((s1,s2),v) -> prerr_endline (Printf.sprintf "((%S, %S), %S)" s1 s2 v))
+  l
+;;
+
 let parse_prop stog env g subject atts gstate subs =
   let pred =
     try List.assoc ("","pred") atts
-    with Not_found -> failwith "Missing \"pred\" attribute for rdf node"
+    with Not_found ->
+        failwith "Missing \"pred\" attribute for rdf node"
   in
   let tag = tag_of_string pred in
   let rdf_resource = get_rdf_resource stog env atts in
@@ -150,7 +194,7 @@ let parse_prop stog env g subject atts gstate subs =
   let atts =
     match rdf_resource with
       None -> atts
-    | Some uri -> (("rdf", "resource"), uri) :: atts
+    | Some uri -> (("", Rdf_uri.string Rdf_rdf.rdf_resource), uri) :: atts
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_node.Uri subject) ;
@@ -158,11 +202,14 @@ let parse_prop stog env g subject atts gstate subs =
       xml_base = Rdf_uri.uri stog.Stog_types.stog_base_url ;
       xml_lang = None ;
       datatype = None ;
-      namespaces = Rdf_uri.Urimap.empty ;
+      namespaces = gstate.Rdf_xml.gnamespaces ; (*Rdf_uri.Urimap.empty ;*)
     }
   in
   let subs = List.map map_to_rdf_xml_tree subs in
   let node = Rdf_xml.E ((tag, atts), subs) in
+  let node = apply_namespaces gstate.Rdf_xml.gnamespaces node in
+  prerr_endline (Printf.sprintf "rdf node:\n%s"
+   (Xtmpl.string_of_xml (map_to_xml_tree node)));
   let (gstate, _) = Rdf_xml.input_prop g state (gstate, 0) node in
   gstate
 ;;
@@ -173,7 +220,7 @@ let gather =
   | Xtmpl.T (tag, atts, subs) ->
       let atts = to_full_atts atts in
       iter stog env elt_url subj_id g gstate (Xtmpl.E ((("",tag), atts), subs))
-  | Xtmpl.E ((("",rdf), atts), subs) ->
+  | Xtmpl.E ((("","rdf"), atts), subs) ->
       let subject =
         let uri =
           match subj_id with
@@ -183,7 +230,11 @@ let gather =
         Rdf_uri.uri uri
       in
       parse_prop stog env g subject atts gstate subs
-  | Xtmpl.E (_,subs) ->
+  | Xtmpl.E ((_, atts),subs) ->
+      let subj_id =
+         try Some (List.assoc ("", "id") atts)
+         with Not_found -> subj_id
+      in
       iter_list stog env elt_url subj_id g gstate subs
   and iter_list stog env elt_url subj_id g gstate l =
     List.fold_left (iter stog env elt_url subj_id g) gstate l
@@ -200,10 +251,28 @@ let make_graph env stog elt_id elt =
       None -> elt.Stog_types.elt_body
     | Some x -> x
   in
-  let x = gather stog env g elt gstate xmls in
-  set_graph (g, x);
-  elt
+  try
+    let x = gather stog env g elt gstate xmls in
+    set_graph (g, x);
+    elt
+  with
+    e ->
+      let s = Xtmpl.string_of_xmls xmls in
+      prerr_endline s;
+      raise e
+;;
+
+let output_graph _ stog _ =
+  let (g, gstate) = graph () in
+  let namespaces = namespaces stog in
+  let dot = Rdf_dot.dot_of_graph ~namespaces g in
+  Stog_misc.file_of_string ~file:"/tmp/graph.dot" dot;
+  let out_file = Filename.concat stog.Stog_types.stog_outdir file in
+  Rdf_xml.to_file ~namespaces g out_file;
+  Stog_plug.verbose (Printf.sprintf "RDF graph dumped into %S" out_file);
+  []
 ;;
 
 let () = Stog_plug.register_level_fun 200 make_graph;;
-prerr_endline "coucou";;
+let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
+
