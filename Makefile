@@ -22,11 +22,11 @@ opt: $(PLUGIN)
 byte: $(PLUGIN_BYTE)
 
 stog_rdf.cmxs: stog_rdf.cmx
-	$(OCAMLFIND) ocamlopt -package $(PACKAGES) -linkpkg -shared -o $@ \
+	$(OCAMLFIND) ocamlopt -package netstring,rdf -linkpkg -shared -o $@ \
 	$(LINKFLAGS) $^
 
 stog_rdf.cma: stog_rdf.cmo
-	$(OCAMLFIND) ocamlc -a -package $(PACKAGES) -linkpkg -o $@ \
+	$(OCAMLFIND) ocamlc -a -package netstring,rdf -linkpkg -o $@ \
 	$(LINKFLAGS_BYTE) $^
 
 install:
@@ -41,6 +41,10 @@ distclean: clean
 clean:
 	rm -f *.cm* *.o *.annot
 
+test:
+	stog.byte --package stog-rdf -v -v -d /tmp/rdftest test/
+testopt:
+	stog --package stog-rdf -v -v -d /tmp/rdftest test/
 
 # Rules
 .SUFFIXES: .mli .ml .cmi .cmo .cmx
@@ -61,7 +65,7 @@ clean:
 %.cmx %.o:%.ml
 	$(OCAMLFIND) ocamlopt $(COMPFLAGS) -c $<
 
-.PHONY: clean depend
+.PHONY: clean depend test testopt
 
 .depend depend:
 	ocamldep *.ml > .depend
