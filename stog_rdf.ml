@@ -41,12 +41,12 @@
 open Stog_types;;
 
 let plugin_name = "rdf";;
-let file = "graph.rdf";;
 
 let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
 
 let graph_by_elt = ref Str_map.empty;;
 
+let out_file = ref "graph.rdf";;
 let namespaces = ref None;;
 let read_namespaces stog =
   let module CF = Config_file in
@@ -55,9 +55,13 @@ let read_namespaces stog =
     (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers) ~group
     ["namespaces"] [] "pairs (uri, name) specifying namespaces"
   in
+  let graph_file = new CF.string_cp ~group ["graph_file"] !out_file
+    "name of main graph output file"
+  in
   let rc_file = rc_file stog in
   group#read rc_file;
   group#write rc_file;
+  out_file := graph_file#get;
   List.fold_left
     (fun acc (uri, name) -> (Rdf_uri.uri uri, name) :: acc)
     [ Rdf_uri.uri stog.Stog_types.stog_base_url, "site" ;
@@ -325,7 +329,7 @@ let output_graph _ stog _ =
   Str_map.iter (fun _ g_elt -> Rdf_graph.merge g g_elt) !graph_by_elt;
   let dot = Rdf_dot.dot_of_graph ~namespaces g in
   Stog_misc.file_of_string ~file:"/tmp/graph.dot" dot;
-  let out_file = Filename.concat stog.Stog_types.stog_outdir file in
+  let out_file = Filename.concat stog.Stog_types.stog_outdir !out_file in
   Rdf_xml.to_file ~namespaces g out_file;
   Stog_plug.verbose (Printf.sprintf "RDF graph dumped into %S" out_file);
   []
