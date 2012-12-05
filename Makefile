@@ -7,7 +7,7 @@ OCAMLDOC=ocamldoc
 OCAMLLEX=ocamllex
 OCAMLFIND=ocamlfind
 
-PACKAGES=netstring,stog,rdf
+PACKAGES=netstring,stog,rdf,config-file
 
 INCLUDES=-I +ocamldoc
 COMPFLAGS=$(INCLUDES) -g -annot -package $(PACKAGES) -rectypes

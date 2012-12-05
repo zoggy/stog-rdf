@@ -38,13 +38,44 @@
   The graph is dumped into [graph.rdf] file.
 *)
 
+open Stog_types;;
+
+let plugin_name = "rdf";;
 let file = "graph.rdf";;
-let namespaces stog =
-  [ Rdf_uri.uri stog.Stog_types.stog_base_url, "site" ;
-    Rdf_rdf.rdf_ "", "rdf" ;
-    Rdf_uri.uri "http://toto.com/dump.rdf#", "toto";
-  ]
+
+let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
+
+let graph_by_elt = ref Str_map.empty;;
+
+let namespaces = ref None;;
+let read_namespaces stog =
+  let module CF = Config_file in
+  let group = new CF.group in
+  let ns = new CF.list_cp
+    (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers) ~group
+    ["namespaces"] [] "pairs (uri, name) specifying namespaces"
+  in
+  let rc_file = rc_file stog in
+  group#read rc_file;
+  group#write rc_file;
+  List.fold_left
+    (fun acc (uri, name) -> (Rdf_uri.uri uri, name) :: acc)
+    [ Rdf_uri.uri stog.Stog_types.stog_base_url, "site" ;
+      Rdf_rdf.rdf_ "", "rdf" ;
+    ]
+    ns#get
 ;;
+
+
+let namespaces stog =
+  match !namespaces with
+    Some ns -> ns
+  | None ->
+      let ns = read_namespaces stog in
+      namespaces := Some ns;
+      ns
+;;
+
 
 let build_ns_map namespaces =
   let pred uri name uri2 name2 =
@@ -208,8 +239,10 @@ let parse_prop stog env g subject atts gstate subs =
   let subs = List.map map_to_rdf_xml_tree subs in
   let node = Rdf_xml.E ((tag, atts), subs) in
   let node = apply_namespaces gstate.Rdf_xml.gnamespaces node in
+(*
   prerr_endline (Printf.sprintf "rdf node:\n%s"
    (Xtmpl.string_of_xml (map_to_xml_tree node)));
+*)
   let (gstate, _) = Rdf_xml.input_prop g state (gstate, 0) node in
   gstate
 ;;
@@ -244,27 +277,52 @@ let gather =
     iter_list stog env elt_url None g gstate xmls
 ;;
 
+let create_graph ?elt stog =
+  let base_url =
+    match elt with
+      None -> stog.Stog_types.stog_base_url
+    | Some elt -> Stog_html.elt_url stog elt
+  in
+  let g = Rdf_graph.open_graph (Rdf_uri.uri base_url) in
+  let namespaces = namespaces stog in
+  let gstate = {
+      Rdf_xml.blanks = Rdf_xml.SMap.empty ;
+      gnamespaces = build_ns_map namespaces ;
+    }
+  in
+  (g, gstate)
+;;
+
+let add_elt_graph elt g =
+  graph_by_elt := Str_map.add
+    (Stog_types.string_of_human_id elt.elt_human_id) g
+    !graph_by_elt
+;;
+
 let make_graph env stog elt_id elt =
-  let (g, gstate) = graph () in
+  let (g, gstate) = create_graph ~elt stog in
   let xmls =
     match elt.Stog_types.elt_out with
       None -> elt.Stog_types.elt_body
     | Some x -> x
   in
   try
-    let x = gather stog env g elt gstate xmls in
-    set_graph (g, x);
+    ignore(gather stog env g elt gstate xmls);
+    add_elt_graph elt g;
     elt
   with
     e ->
+  (*
       let s = Xtmpl.string_of_xmls xmls in
       prerr_endline s;
+  *)
       raise e
 ;;
 
 let output_graph _ stog _ =
-  let (g, gstate) = graph () in
+  let (g, _) = create_graph stog in
   let namespaces = namespaces stog in
+  Str_map.iter (fun _ g_elt -> Rdf_graph.merge g g_elt) !graph_by_elt;
   let dot = Rdf_dot.dot_of_graph ~namespaces g in
   Stog_misc.file_of_string ~file:"/tmp/graph.dot" dot;
   let out_file = Filename.concat stog.Stog_types.stog_outdir file in
@@ -276,3 +334,26 @@ let output_graph _ stog _ =
 let () = Stog_plug.register_level_fun 200 make_graph;;
 let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
 
+module Cache =
+  struct
+    type t = string
+    let name = plugin_name
+    let load elt xml =
+      let stog = Stog_plug.stog () in
+      let (g,_) = create_graph ~elt stog in
+      let base = Rdf_uri.uri (Stog_html.elt_url stog elt) in
+      Rdf_xml.from_string g ~base xml ;
+      add_elt_graph elt g
+
+    let store elt =
+      let stog = Stog_plug.stog () in
+      let g =
+        try Str_map.find (Stog_types.string_of_human_id elt.elt_human_id) !graph_by_elt
+        with Not_found ->
+            fst (create_graph ~elt stog)
+      in
+      let namespaces = namespaces stog in
+      Rdf_xml.to_string ~namespaces g
+  end;;
+
+let () = Stog_plug.register_cache (module Cache);;
