@@ -29,13 +29,6 @@
 
 (** RDF Plugin.
   Handle [<rdf>] nodes to create an RDF graph for the site.
-
-  It runs through the final element body and use [<rdf pred="..." obj="..."/>]
-  to add triples in the graph, using as subject:
-  - the element url, or
-  - (the element url)#id when we are under a node with a specified id.
-
-  The graph is dumped into [graph.rdf] file.
 *)
 
 open Stog_types;;
