@@ -179,23 +179,18 @@ let get_rdf_resource stog env atts =
           None
 ;;
 
-let to_full_atts = List.map (fun (s,v) -> ("",s), v);;
-
 let rec map_to_rdf_xml_tree = function
   Xtmpl.D s -> Rdf_xml.D s
-| Xtmpl.T (tag, atts, subs) ->
-    let atts = to_full_atts atts in
-    map_to_rdf_xml_tree (Xtmpl.E ((("",tag), atts), subs))
-| Xtmpl.E (t,subs) ->
+| Xtmpl.E (t, atts, subs) ->
     let subs = List.map map_to_rdf_xml_tree subs in
-    Rdf_xml.E (t, subs)
+    Rdf_xml.E ((t, atts), subs)
 ;;
 
 let rec map_to_xml_tree = function
   Rdf_xml.D s -> Xtmpl.D s
-| Rdf_xml.E (t,subs) ->
+| Rdf_xml.E ((t, atts), subs) ->
     let subs = List.map map_to_xml_tree subs in
-    Xtmpl.E (t, subs)
+    Xtmpl.E (t, atts, subs)
 ;;
 
 let prerr_atts l =
@@ -247,10 +242,7 @@ let parse_prop stog env g subject atts gstate subs =
 let gather =
   let rec iter stog env elt_url subj_id g gstate = function
     Xtmpl.D _ -> gstate
-  | Xtmpl.T (tag, atts, subs) ->
-      let atts = to_full_atts atts in
-      iter stog env elt_url subj_id g gstate (Xtmpl.E ((("",tag), atts), subs))
-  | Xtmpl.E ((("","rdf"), atts), subs) ->
+  | Xtmpl.E (("","rdf"), atts, subs) ->
       let subject =
         let uri =
           match subj_id with
@@ -260,7 +252,7 @@ let gather =
         Rdf_uri.uri uri
       in
       parse_prop stog env g subject atts gstate subs
-  | Xtmpl.E ((_, atts),subs) ->
+  | Xtmpl.E (_, atts, subs) ->
       let subj_id =
          try Some (List.assoc ("", "id") atts)
          with Not_found -> subj_id
