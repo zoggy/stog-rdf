@@ -45,7 +45,7 @@ let rdf_uri s =
       let msg = Printf.sprintf "While making uri from %S: %s" s
         (Printexc.to_string e)
       in
-      fawilth msg
+      failwith msg
 ;;
 
 let out_file = ref "graph.rdf";;
