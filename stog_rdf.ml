@@ -39,6 +39,15 @@ let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
 
 let graph_by_elt = ref Str_map.empty;;
 
+let rdf_uri s =
+  try Rdf_uri.uri s
+  with e ->
+      let msg = Printf.sprintf "While making uri from %S: %s" s
+        (Printexc.to_string e)
+      in
+      fawilth msg
+;;
+
 let out_file = ref "graph.rdf";;
 let namespaces = ref None;;
 let read_namespaces stog =
@@ -56,8 +65,8 @@ let read_namespaces stog =
   group#write rc_file;
   out_file := graph_file#get;
   List.fold_left
-    (fun acc (uri, name) -> (Rdf_uri.uri uri, name) :: acc)
-    [ Rdf_uri.uri stog.Stog_types.stog_base_url, "site" ;
+    (fun acc (uri, name) -> (rdf_uri uri, name) :: acc)
+    [ rdf_uri stog.Stog_types.stog_base_url, "site" ;
       Rdf_rdf.rdf_ "", "rdf" ;
     ]
     ns#get
@@ -135,7 +144,7 @@ let graph () =
     Some x -> x
   | None ->
       let stog = Stog_plug.stog () in
-      let g = Rdf_graph.open_graph (Rdf_uri.uri stog.Stog_types.stog_base_url) in
+      let g = Rdf_graph.open_graph (rdf_uri stog.Stog_types.stog_base_url) in
       let namespaces = namespaces stog in
       let gstate = {
           Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -222,7 +231,7 @@ let parse_prop stog env g subject atts gstate subs =
   let state = {
       Rdf_xml.subject = Some (Rdf_node.Uri subject) ;
       predicate = None ;
-      xml_base = Rdf_uri.uri stog.Stog_types.stog_base_url ;
+      xml_base = rdf_uri stog.Stog_types.stog_base_url ;
       xml_lang = None ;
       datatype = None ;
       namespaces = gstate.Rdf_xml.gnamespaces ; (*Rdf_uri.Urimap.empty ;*)
@@ -249,7 +258,7 @@ let gather =
             None -> elt_url
           | Some id -> elt_url ^ "#" ^ id
         in
-        Rdf_uri.uri uri
+        rdf_uri uri
       in
       parse_prop stog env g subject atts gstate subs
   | Xtmpl.E (_, atts, subs) ->
@@ -272,7 +281,7 @@ let create_graph ?elt stog =
       None -> stog.Stog_types.stog_base_url
     | Some elt -> Stog_html.elt_url stog elt
   in
-  let g = Rdf_graph.open_graph (Rdf_uri.uri base_url) in
+  let g = Rdf_graph.open_graph (rdf_uri base_url) in
   let namespaces = namespaces stog in
   let gstate = {
       Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -330,7 +339,7 @@ module Cache =
     let load elt xml =
       let stog = Stog_plug.stog () in
       let (g,_) = create_graph ~elt stog in
-      let base = Rdf_uri.uri (Stog_html.elt_url stog elt) in
+      let base = rdf_uri (Stog_html.elt_url stog elt) in
       Rdf_xml.from_string g ~base xml ;
       add_elt_graph elt g
 

@@ -22,11 +22,11 @@ opt: $(PLUGIN)
 byte: $(PLUGIN_BYTE)
 
 stog_rdf.cmxs: stog_rdf.cmx
-	$(OCAMLFIND) ocamlopt -package netstring,rdf -linkpkg -shared -o $@ \
+	$(OCAMLFIND) ocamlopt -package rdf -linkpkg -shared -o $@ \
 	$(LINKFLAGS) $^
 
 stog_rdf.cma: stog_rdf.cmo
-	$(OCAMLFIND) ocamlc -a -package netstring,rdf -linkpkg -o $@ \
+	$(OCAMLFIND) ocamlc -a -package rdf -linkpkg -o $@ \
 	$(LINKFLAGS_BYTE) $^
 
 install:
