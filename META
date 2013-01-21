@@ -1,6 +1,8 @@
-version = "0.6"
+version = "0.7.0"
 description = "Stog RDF plugin"
 requires = ""
+archive(byte) = "stog_rdf.cma"
+archive(native) = "stog_rdf.cmxa"
 archive(stog,byte) = "stog_rdf.cma"
 archive(stog,native) = "stog_rdf.cmxs"
 

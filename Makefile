@@ -26,7 +26,7 @@
 #                                                                               #
 #################################################################################
 
-VERSION=0.6
+VERSION=0.7.0
 
 MKDIR=mkdir -p
 CP=cp -f
@@ -45,14 +45,19 @@ LINKFLAGS=$(INCLUDES)
 LINKFLAGS_BYTE=$(INCLUDES)
 
 PLUGIN=stog_rdf.cmxs
+PLUGIN_LIB=stog_rdf.cmxa
 PLUGIN_BYTE=$(PLUGIN:.cmxs=.cma)
 
 all: byte opt
-opt: $(PLUGIN)
+opt: $(PLUGIN) $(PLUGIN_LIB)
 byte: $(PLUGIN_BYTE)
 
 stog_rdf.cmxs: stog_rdf.cmx
 	$(OCAMLFIND) ocamlopt -package rdf -linkpkg -shared -o $@ \
+	$(LINKFLAGS) $^
+
+stog_rdf.cmxa: stog_rdf.cmx
+	$(OCAMLFIND) ocamlopt -a -package rdf -o $@ \
 	$(LINKFLAGS) $^
 
 stog_rdf.cma: stog_rdf.cmo
@@ -61,7 +66,7 @@ stog_rdf.cma: stog_rdf.cmo
 
 install:
 	$(OCAMLFIND) install stog-rdf META \
-	$(PLUGIN) $(PLUGIN_BYTE)
+	$(PLUGIN) $(PLUGIN_BYTE) $(PLUGIN_LIB) $(PLUGIN_LIB:.cmxa=.a)
 
 uninstall:
 	$(OCAMLFIND) remove stog-rdf
