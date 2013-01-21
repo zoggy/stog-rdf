@@ -1,3 +1,6 @@
+
+VERSION=0.6
+
 MKDIR=mkdir -p
 CP=cp -f
 
@@ -45,6 +48,20 @@ test:
 	stog.byte --package stog-rdf -v -v -d /tmp/rdftest test/
 testopt:
 	stog --package stog-rdf -v -v -d /tmp/rdftest test/
+
+###########
+archive:
+	git archive --prefix=stog-rdf-$(VERSION)/ HEAD | gzip > /tmp/stog-rdf-$(VERSION).tar.gz
+
+# headers :
+###########
+HEADFILES= Makefile stog_rdf.ml
+headers:
+	echo $(HEADFILES)
+	headache -h header -c .headache_config `ls $(HEADFILES) | grep -v plugin_example`
+
+noheaders:
+	headache -r -c .headache_config `ls $(HEADFILES)`
 
 # Rules
 .SUFFIXES: .mli .ml .cmi .cmo .cmx
