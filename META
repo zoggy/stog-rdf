@@ -3,9 +3,8 @@ description = "Stog RDF plugin"
 requires = "rdf"
 archive(byte) = "stog_rdf.cma"
 archive(native) = "stog_rdf.cmxa"
-requires(stog,byte)=""
-requires(stog,native)=""
 archive(stog,byte) = "stog_rdf.cma"
+requires(stog,native)=""
 archive(stog,native) = "stog_rdf.cmxs"
 
 

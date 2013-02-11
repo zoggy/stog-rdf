@@ -61,7 +61,7 @@ stog_rdf.cmxa: stog_rdf.cmx
 	$(LINKFLAGS) $^
 
 stog_rdf.cma: stog_rdf.cmo
-	$(OCAMLFIND) ocamlc -a -package rdf -linkpkg -o $@ \
+	$(OCAMLFIND) ocamlc -a -package rdf -o $@ \
 	$(LINKFLAGS_BYTE) $^
 
 install:
