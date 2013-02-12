@@ -3,8 +3,8 @@ description = "Stog RDF plugin"
 requires = "rdf"
 archive(byte) = "stog_rdf.cma"
 archive(native) = "stog_rdf.cmxa"
-archive(stog,byte) = "stog_rdf.cma"
-requires(stog,native)=""
-archive(stog,native) = "stog_rdf.cmxs"
+archive(plugin,byte) = "stog_rdf.cma"
+requires(plugin,native)=""
+archive(plugin,native) = "stog_rdf.cmxs"
 
 
