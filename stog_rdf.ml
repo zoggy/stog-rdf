@@ -304,6 +304,12 @@ let make_graph env stog elt_id elt =
     | Some x -> x
   in
   try
+    let env =
+      Xtmpl.env_of_list ~env
+        [("", Stog_tags.elt_hid),
+          (fun  _ _ _ -> [Xtmpl.D (Stog_types.string_of_human_id elt.elt_human_id)])
+        ]
+    in
     ignore(gather stog env g elt gstate xmls);
     add_elt_graph elt g;
     elt
