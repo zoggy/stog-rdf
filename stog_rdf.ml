@@ -71,7 +71,6 @@ let read_namespaces stog =
     ns#get
 ;;
 
-
 let namespaces stog =
   match !namespaces with
     Some ns -> ns
@@ -80,7 +79,6 @@ let namespaces stog =
       namespaces := Some ns;
       ns
 ;;
-
 
 let build_ns_map namespaces =
   let pred uri name uri2 name2 =
@@ -322,6 +320,8 @@ let make_graph env stog elt_id elt =
       raise e
 ;;
 
+let final_graph = ref None;;
+
 let output_graph _ stog _ =
   let (g, _) = create_graph stog in
   let namespaces = namespaces stog in
@@ -331,11 +331,41 @@ let output_graph _ stog _ =
   let out_file = Filename.concat stog.Stog_types.stog_outdir !out_file in
   Rdf_xml.to_file ~namespaces g out_file;
   Stog_plug.verbose (Printf.sprintf "RDF graph dumped into %S" out_file);
+  final_graph := Some g;
   []
 ;;
 
+let fun_rdf_select env args subs =
+  let g =
+    match !final_graph with
+      None -> failwith "No final graph!"
+    | Some g -> g
+  in
+  let tmpl =
+    match Xtmpl.get_arg args ("", "tmpl") with
+      None -> failwith "No tmpl attribute for rdf-select"
+    | Some tmpl -> tmpl
+  in
+  let sep =
+    match Xtmpl.get_arg args ("", "sep") with
+      None -> Xtmpl.D ""
+    | Some s -> Xtmpl.xml_of_string s
+  in
+  let sub = Xtmpl.get_arg args ("", "subject") in
+  let pred = Xtmpl.get_arg args ("", "predicate") in
+  let obj = Xtmpl.get_arg args ("", "object") in
+  failwith "rdf-select not implemented"
+;;
+
+let rules_rdf_select stog elt_id elt =
+  let rules = Stog_html.build_base_rules stog elt_id elt in
+  (("", "rdf-select"), fun_rdf_select) :: rules
+;;
+
+
 let () = Stog_plug.register_level_fun 200 make_graph;;
 let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
+let () = Stog_plug.register_level_fun 220 (Stog_html.compute_elt rules_rdf_select);;
 
 module Cache =
   struct
