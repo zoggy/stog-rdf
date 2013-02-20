@@ -66,7 +66,7 @@ stog_rdf.cma: stog_rdf.cmo
 
 install:
 	$(OCAMLFIND) install stog-rdf META \
-	$(PLUGIN) $(PLUGIN_BYTE) $(PLUGIN_LIB) $(PLUGIN_LIB:.cmxa=.a)
+	$(PLUGIN) $(PLUGIN_BYTE) $(PLUGIN_LIB) $(PLUGIN_LIB:.cmxa=.a) $(PLUGIN:.cmxs=.cmi)
 
 uninstall:
 	$(OCAMLFIND) remove stog-rdf
