@@ -65,7 +65,7 @@ let read_namespaces stog =
   out_file := graph_file#get;
   List.fold_left
     (fun acc (uri, name) -> (rdf_uri uri, name) :: acc)
-    [ rdf_uri stog.Stog_types.stog_base_url, "site" ;
+    [ Rdf_uri.of_neturl stog.Stog_types.stog_base_url, "site" ;
       Rdf_rdf.rdf_ "", "rdf" ;
     ]
     ns#get
@@ -141,7 +141,7 @@ let graph () =
     Some x -> x
   | None ->
       let stog = Stog_plug.stog () in
-      let g = Rdf_graph.open_graph (rdf_uri stog.Stog_types.stog_base_url) in
+      let g = Rdf_graph.open_graph (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) in
       let namespaces = namespaces stog in
       let gstate = {
           Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -166,7 +166,7 @@ let tag_of_string s = ("", s)
 
 let get_rdf_resource stog env atts =
   try
-    Some (List.assoc ("","obj") atts)
+    Some (Stog_types.url_of_string (List.assoc ("","obj") atts))
   with
     Not_found ->
       try
@@ -175,9 +175,10 @@ let get_rdf_resource stog env atts =
           None -> raise Not_found
         | Some (elt, hid, idopt) ->
             let url =
-              Printf.sprintf "%s%s"
-              (Stog_html.elt_url stog elt)
-              (match idopt with None -> "" | Some s -> "#"^s)
+              let url = Stog_html.elt_url stog elt in
+              match idopt with
+                None -> url
+              | Some s -> Neturl.modify_url ~fragment: s url
             in
             Some url
       with
@@ -223,12 +224,14 @@ let parse_prop stog env g subject atts gstate subs =
   let atts =
     match rdf_resource with
       None -> atts
-    | Some uri -> (("", Rdf_uri.string Rdf_rdf.rdf_resource), uri) :: atts
+    | Some uri ->
+        (("", Rdf_uri.string Rdf_rdf.rdf_resource),
+         Stog_types.string_of_url uri) :: atts
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_node.Uri subject) ;
       predicate = None ;
-      xml_base = rdf_uri stog.Stog_types.stog_base_url ;
+      xml_base = Rdf_uri.of_neturl stog.Stog_types.stog_base_url ;
       xml_lang = None ;
       datatype = None ;
       namespaces = gstate.Rdf_xml.gnamespaces ; (*Rdf_uri.Urimap.empty ;*)
@@ -253,9 +256,9 @@ let gather =
         let uri =
           match subj_id with
             None -> elt_url
-          | Some id -> elt_url ^ "#" ^ id
+          | Some id -> Neturl.modify_url ~fragment: id elt_url
         in
-        rdf_uri uri
+        Rdf_uri.of_neturl uri
       in
       parse_prop stog env g subject atts gstate subs
   | Xtmpl.E (_, atts, subs) ->
@@ -278,7 +281,7 @@ let create_graph ?elt stog =
       None -> stog.Stog_types.stog_base_url
     | Some elt -> Stog_html.elt_url stog elt
   in
-  let g = Rdf_graph.open_graph (rdf_uri base_url) in
+  let g = Rdf_graph.open_graph (Rdf_uri.of_neturl base_url) in
   let namespaces = namespaces stog in
   let gstate = {
       Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -374,7 +377,7 @@ module Cache =
     let load elt xml =
       let stog = Stog_plug.stog () in
       let (g,_) = create_graph ~elt stog in
-      let base = rdf_uri (Stog_html.elt_url stog elt) in
+      let base = Rdf_uri.of_neturl (Stog_html.elt_url stog elt) in
       Rdf_xml.from_string g ~base xml ;
       add_elt_graph elt g
 
