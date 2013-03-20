@@ -166,7 +166,7 @@ let tag_of_string s = ("", s)
 
 let get_rdf_resource stog env atts =
   try
-    Some (Stog_types.url_of_string (List.assoc ("","obj") atts))
+    Some (List.assoc ("","obj") atts)
   with
     Not_found ->
       try
@@ -180,7 +180,7 @@ let get_rdf_resource stog env atts =
                 None -> url
               | Some s -> Neturl.modify_url ~fragment: s url
             in
-            Some url
+            Some (Stog_types.string_of_url url)
       with
         Not_found ->
           None
@@ -225,8 +225,7 @@ let parse_prop stog env g subject atts gstate subs =
     match rdf_resource with
       None -> atts
     | Some uri ->
-        (("", Rdf_uri.string Rdf_rdf.rdf_resource),
-         Stog_types.string_of_url uri) :: atts
+        (("", Rdf_uri.string Rdf_rdf.rdf_resource), uri) :: atts
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_node.Uri subject) ;
