@@ -153,16 +153,6 @@ let graph () =
 ;;
 
 let tag_of_string s = ("", s)
-(*  try
-    let len = String.length s in
-    let p = String.index s ':' in
-    if len > p then
-      ((String.sub s 0 p)^":", String.sub s (p+1) (len - p - 1))
-    else
-      ("", String.sub s 0 p)
-  with Not_found -> ("",s)
-;;
-*)
 
 let get_rdf_resource stog env atts =
   try
@@ -208,6 +198,10 @@ let prerr_atts l =
 ;;
 
 let parse_prop stog env g subject atts gstate subs =
+  let subject =
+    try Rdf_uri.uri (List.assoc ("","subject") atts)
+    with Not_found -> subject
+  in
   let pred =
     try List.assoc ("","pred") atts
     with Not_found ->
@@ -217,7 +211,7 @@ let parse_prop stog env g subject atts gstate subs =
   let rdf_resource = get_rdf_resource stog env atts in
   let atts = List.filter
     (function
-         (("","pred"),_) | (("","href"),_) | (("","obj"),_) -> false
+         (("", "subject"), _) | (("","pred"),_) | (("","href"),_) | (("","obj"),_) -> false
      | _ -> true
     ) atts
   in
@@ -337,7 +331,42 @@ let output_graph _ stog _ =
   []
 ;;
 
-let fun_rdf_select env args subs =
+let string_of_term = function
+  Rdf_node.Uri uri -> Rdf_uri.string uri
+| Rdf_node.Literal lit -> lit.Rdf_node.lit_value
+| Rdf_node.Blank -> "_"
+| Rdf_node.Blank_ id -> Rdf_node.string_of_blank_id id
+
+let apply_sol env stog elt tmpl sol =
+  let atts =
+    Rdf_sparql_ms.mu_fold
+      (fun name term acc -> (("", name), string_of_term term)::acc)
+      sol
+      [ ("", "tmpl"), tmpl ]
+  in
+  Xtmpl.E (("",Stog_tags.include_), atts, [])
+
+let apply_sols env stog elt tmpl sep sols =
+  let rec iter acc = function
+    [] -> List.rev acc
+  | sol :: q ->
+     let xml = apply_sol env stog elt tmpl sol in
+     match q with
+       [] -> iter (xml :: acc) q
+     | _ -> iter (sep :: xml :: acc) q
+  in
+  iter [] sols
+
+let keep_pcdata =
+  let rec iter b = function
+    [] -> Buffer.contents b
+  | (Xtmpl.D s) :: q -> Buffer.add_string b s; iter b q
+  | _ :: q -> iter b q
+  in
+  fun xmls -> iter (Buffer.create 256) xmls
+;;
+
+let fun_rdf_select stog elt_id elt env args subs =
   let g =
     match !final_graph with
       None -> failwith "No final graph!"
@@ -353,21 +382,50 @@ let fun_rdf_select env args subs =
       None -> Xtmpl.D ""
     | Some s -> Xtmpl.xml_of_string s
   in
-  let sub = Xtmpl.get_arg args ("", "subject") in
-  let pred = Xtmpl.get_arg args ("", "predicate") in
-  let obj = Xtmpl.get_arg args ("", "object") in
-  failwith "rdf-select not implemented"
+  let query = keep_pcdata subs in
+  let query =
+    (* add default namespaces as header *)
+    List.fold_right
+      (fun (uri, s) acc ->
+         "PREFIX "^s^": <"^(Rdf_uri.string uri)^">\n"^acc)
+      (namespaces stog) query
+  in
+  try
+    let dataset = Rdf_ds.simple_dataset g in
+    Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/foo.ttl";
+    let q = Rdf_sparql.parse_from_string query in
+    let res = Rdf_sparql_query.execute
+      ~base: (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) dataset q
+    in
+    match res with
+      Rdf_sparql_query.Solutions sols ->
+        Stog_msg.verbose
+          (Printf.sprintf "%d solutions for query %s" (List.length sols) query);
+        apply_sols env stog elt tmpl sep sols
+    | _ ->
+        failwith "rdf-select did not return solutions"
+  with
+    Rdf_sparql.Error e ->
+      let msg = Rdf_sparql.string_of_error e in
+      failwith ("SPARQL:\n"^query^"\n"^msg)
+  | e ->
+      let msg = Printexc.to_string e in
+      failwith ("rdf-select:\n"^query^"\n"^msg)
 ;;
 
 let rules_rdf_select stog elt_id elt =
   let rules = Stog_html.build_base_rules stog elt_id elt in
-  (("", "rdf-select"), fun_rdf_select) :: rules
+  (("", "rdf-select"), fun_rdf_select stog elt_id elt) :: rules
 ;;
+
 
 
 let () = Stog_plug.register_level_fun 200 make_graph;;
 let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
 let () = Stog_plug.register_level_fun 220 (Stog_html.compute_elt rules_rdf_select);;
+
+
+
 
 module Cache =
   struct
