@@ -4,7 +4,7 @@ requires = "rdf"
 archive(byte) = "stog_rdf.cma"
 archive(native) = "stog_rdf.cmxa"
 archive(plugin,byte) = "stog_rdf.cma"
-requires(plugin,native)= ""
+requires(plugin,native)= "rdf"
 archive(plugin,native) = "stog_rdf.cmxs"
 
 

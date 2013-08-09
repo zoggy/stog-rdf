@@ -53,7 +53,7 @@ opt: $(PLUGIN) $(PLUGIN_LIB)
 byte: $(PLUGIN_BYTE)
 
 # Hack by now, since there is no .cmxs for netstring libs
-SHARED_CMXAS=`$(OCAMLFIND) query -predicates native rdf -a-format -r | grep -v netstring`
+SHARED_CMXAS=#`$(OCAMLFIND) query -predicates native rdf -a-format -r | grep -v netstring`
 SHARED_INCS=`$(OCAMLFIND) query -predicates native rdf -i-format -r | grep -v netstring`
 stog_rdf.cmxs: stog_rdf.cmx
 	$(OCAMLFIND) ocamlopt $(SHARED_INCS) -shared -o $@ $(SHARED_CMXAS) \

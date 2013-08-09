@@ -408,7 +408,7 @@ let fun_rdf_select stog elt_id elt env args subs =
   in
   try
     let dataset = Rdf_ds.simple_dataset g in
-    Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/foo.ttl";
+    Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";
     let q = Rdf_sparql.parse_from_string query in
     let res = Rdf_sparql_query.execute
       ~base: (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) dataset q
