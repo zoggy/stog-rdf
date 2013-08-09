@@ -32,6 +32,10 @@
 
 open Stog_types;;
 
+let dbg = Stog_misc.create_log_fun
+  ~prefix: "Rdf_sparql_eval"
+    "STOG_RDF_DEBUG_LEVEL"
+;;
 let plugin_name = "rdf";;
 
 let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
@@ -109,12 +113,16 @@ let build_ns_map namespaces =
 
 let apply_namespaces =
   let map_qn ns = function
-    ("",s) ->  ("",s)
+    ("",s) ->
+      dbg ~level: 2 (fun () -> "map_qn: no prefix: "^s);
+      ("",s)
   | (pref, s) ->
+      dbg ~level: 2 (fun () -> "map_qn pref="^pref^", s="^s);
       try
         let p = Rdf_xml.SMap.find pref ns in
         (Rdf_uri.string p, s)
       with Not_found ->
+          dbg ~level: 2 (fun () -> "not found");
           (pref, s)
   in
   let rec iter ns xml =
@@ -152,7 +160,16 @@ let graph () =
       (g, gstate)
 ;;
 
-let tag_of_string s = ("", s)
+let tag_of_string s =
+  try
+    let len = String.length s in
+    let p = String.index s ':' in
+    if len > p then
+      (String.sub s 0 p, String.sub s (p+1) (len - p - 1))
+    else
+      ("", String.sub s 0 p)
+  with Not_found -> ("",s)
+
 
 let get_rdf_resource stog env atts =
   try
@@ -233,10 +250,9 @@ let parse_prop stog env g subject atts gstate subs =
   let subs = List.map map_to_rdf_xml_tree subs in
   let node = Rdf_xml.E ((tag, atts), subs) in
   let node = apply_namespaces gstate.Rdf_xml.gnamespaces node in
-(*
-  prerr_endline (Printf.sprintf "rdf node:\n%s"
-   (Xtmpl.string_of_xml (map_to_xml_tree node)));
-*)
+  dbg ~level: 2 (fun () -> (Printf.sprintf "rdf node:\n%s"
+      (Xtmpl.string_of_xml (map_to_xml_tree node))));
+
   let (gstate, _) = Rdf_xml.input_prop g state (gstate, 0) node in
   gstate
 ;;
@@ -342,7 +358,7 @@ let apply_sol env stog elt tmpl sol =
     Rdf_sparql_ms.mu_fold
       (fun name term acc -> (("", name), string_of_term term)::acc)
       sol
-      [ ("", "tmpl"), tmpl ]
+      [ ("", "file"), tmpl ]
   in
   Xtmpl.E (("",Stog_tags.include_), atts, [])
 
@@ -399,7 +415,7 @@ let fun_rdf_select stog elt_id elt env args subs =
     in
     match res with
       Rdf_sparql_query.Solutions sols ->
-        Stog_msg.verbose
+        Stog_msg.verbose ~level: 2
           (Printf.sprintf "%d solutions for query %s" (List.length sols) query);
         apply_sols env stog elt tmpl sep sols
     | _ ->
