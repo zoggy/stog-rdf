@@ -420,11 +420,11 @@ let fun_rdf_select stog elt_id elt env args subs =
     let dataset = dataset () in
     Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";
     let q = Rdf_sparql.parse_from_string query in
-    let res = Rdf_sparql_query.execute
+    let res = Rdf_sparql.execute
       ~base: (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) dataset q
     in
     match res with
-      Rdf_sparql_query.Solutions sols ->
+      Rdf_sparql.Solutions sols ->
         Stog_msg.verbose ~level: 2
           (Printf.sprintf "%d solutions for query %s" (List.length sols) query);
         apply_sols env stog elt tmpl sep sols
