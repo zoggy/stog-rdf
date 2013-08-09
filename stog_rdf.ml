@@ -159,6 +159,23 @@ let graph () =
       set_graph (g, gstate);
       (g, gstate)
 ;;
+let final_graph = ref None;;
+
+let dataset = ref None;;
+let set_dataset x = dataset := Some x;;
+let dataset () =
+  match !dataset with
+    Some d -> d
+  | None ->
+      let g =
+        match !final_graph with
+          None -> failwith "No final graph!"
+        | Some g -> g
+      in
+      let d = Rdf_ds.simple_dataset g in
+      set_dataset d;
+      d
+;;
 
 let tag_of_string s =
   try
@@ -332,8 +349,6 @@ let make_graph env stog elt_id elt =
       raise e
 ;;
 
-let final_graph = ref None;;
-
 let output_graph _ stog _ =
   let (g, _) = create_graph stog in
   let namespaces = namespaces stog in
@@ -383,11 +398,6 @@ let keep_pcdata =
 ;;
 
 let fun_rdf_select stog elt_id elt env args subs =
-  let g =
-    match !final_graph with
-      None -> failwith "No final graph!"
-    | Some g -> g
-  in
   let tmpl =
     match Xtmpl.get_arg args ("", "tmpl") with
       None -> failwith "No tmpl attribute for rdf-select"
@@ -407,7 +417,7 @@ let fun_rdf_select stog elt_id elt env args subs =
       (namespaces stog) query
   in
   try
-    let dataset = Rdf_ds.simple_dataset g in
+    let dataset = dataset () in
     Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";
     let q = Rdf_sparql.parse_from_string query in
     let res = Rdf_sparql_query.execute
