@@ -40,6 +40,16 @@ let plugin_name = "rdf";;
 
 let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
 
+
+let keep_pcdata =
+  let rec iter b = function
+    [] -> Buffer.contents b
+  | (Xtmpl.D s) :: q -> Buffer.add_string b s; iter b q
+  | _ :: q -> iter b q
+  in
+  fun xmls -> iter (Buffer.create 256) xmls
+;;
+
 let graph_by_elt = ref Str_map.empty;;
 
 let rdf_uri s =
@@ -163,7 +173,7 @@ let final_graph = ref None;;
 
 let dataset = ref None;;
 let set_dataset x = dataset := Some x;;
-let dataset () =
+let dataset stog =
   match !dataset with
     Some d -> d
   | None ->
@@ -172,7 +182,12 @@ let dataset () =
           None -> failwith "No final graph!"
         | Some g -> g
       in
-      let d = Rdf_ds.simple_dataset g in
+      let named =
+        Str_map.fold
+          (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
+          !graph_by_elt []
+      in
+      let d = Rdf_ds.simple_dataset ~named g in
       set_dataset d;
       d
 ;;
@@ -368,75 +383,130 @@ let string_of_term = function
 | Rdf_node.Blank -> "_"
 | Rdf_node.Blank_ id -> Rdf_node.string_of_blank_id id
 
-let apply_sol env stog elt tmpl sol =
+
+type query_spec =
+  { query : string ;
+    tmpl : Xtmpl.tree list ;
+    separator : Xtmpl.tree list ;
+    args : Xtmpl.attribute list ;
+  }
+
+let apply_select_sol env stog elt tmpl sol =
   let atts =
-    Rdf_sparql_ms.mu_fold
+    Rdf_sparql.solution_fold
       (fun name term acc -> (("", name), string_of_term term)::acc)
       sol
-      [ ("", "file"), tmpl ]
+      []
   in
-  Xtmpl.E (("",Stog_tags.include_), atts, [])
+  [Xtmpl.E (("",Xtmpl.tag_env), atts, tmpl)]
+;;
 
-let apply_sols env stog elt tmpl sep sols =
+let apply_select_sols env stog elt query sols =
   let rec iter acc = function
     [] -> List.rev acc
   | sol :: q ->
-     let xml = apply_sol env stog elt tmpl sol in
+     let xml = apply_select_sol env stog elt query.tmpl sol in
      match q with
-       [] -> iter (xml :: acc) q
-     | _ -> iter (sep :: xml :: acc) q
+       [] -> iter (xml @ acc) q
+     | _ -> iter (query.separator @ xml @ acc) q
   in
-  iter [] sols
-
-let keep_pcdata =
-  let rec iter b = function
-    [] -> Buffer.contents b
-  | (Xtmpl.D s) :: q -> Buffer.add_string b s; iter b q
-  | _ :: q -> iter b q
-  in
-  fun xmls -> iter (Buffer.create 256) xmls
+  let xmls = iter [] sols in
+  match query.args with
+    [] -> xmls
+  | _ -> [Xtmpl.E (("", Xtmpl.tag_env), query.args, xmls)]
 ;;
 
-let fun_rdf_select stog elt_id elt env args subs =
-  let tmpl =
-    match Xtmpl.get_arg args ("", "tmpl") with
-      None -> failwith "No tmpl attribute for rdf-select"
-    | Some tmpl -> tmpl
-  in
-  let sep =
-    match Xtmpl.get_arg args ("", "sep") with
-      None -> Xtmpl.D ""
-    | Some s -> Xtmpl.xml_of_string s
-  in
-  let query = keep_pcdata subs in
-  let query =
-    (* add default namespaces as header *)
-    List.fold_right
-      (fun (uri, s) acc ->
-         "PREFIX "^s^": <"^(Rdf_uri.string uri)^">\n"^acc)
-      (namespaces stog) query
-  in
+let rec read_select_query_from_atts stog elt query = function
+  [] -> query
+| arg :: q ->
+    let query =
+      match arg with
+        (("", "with-contents"), _) -> query
+      | (("", "sep"), s) ->
+          { query with separator = [Xtmpl.D s]}
+      | (("", "query"), s) ->
+          { query with query = s }
+      | (("", "tmpl"), file) ->
+          let tmpl = Stog_tmpl.read_template_file stog elt file in
+          { query with tmpl = [tmpl] }
+      | ((prefix, att), s) ->
+          { query with
+            args = ((prefix, att), s) :: query.args ;
+          }
+    in
+    read_select_query_from_atts stog elt query q
+;;
+
+let rec read_select_query_from_xmls stog elt query = function
+  [] -> query
+| (Xtmpl.D _) :: q -> read_select_query_from_xmls stog elt query q
+| (Xtmpl.E (tag,_,xmls)) :: q ->
+    let query =
+      match tag with
+        ("", "contents") -> { query with tmpl = xmls }
+      | ("", "sep") -> { query with separator = xmls}
+      | ("", "query") -> { query with query = keep_pcdata xmls }
+      | (prefix, tag) ->
+          { query with
+            args = ((prefix, tag), Xtmpl.string_of_xmls xmls) :: query.args ;
+          }
+    in
+    read_select_query_from_xmls stog elt query q
+;;
+
+let build_select_query stog elt env args subs =
+  let q = { query = "" ; tmpl = [] ; separator = [] ; args = [] } in
+  let q = read_select_query_from_atts stog elt q args in
+  let q = { q with args = List.rev q.args } in
+  match Xtmpl.opt_arg args ~def: "false" ("", "with-contents") = "true" with
+    true -> read_select_query_from_xmls stog elt q subs
+  | false ->
+      match q.query with
+        "" -> { q with query = keep_pcdata subs }
+      | _ -> q
+;;
+
+let exec_select stog elt env query =
   try
     let dataset = dataset () in
-    Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";
-    let q = Rdf_sparql.parse_from_string query in
+    (*Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";*)
+    let q = Rdf_sparql.parse_from_string query.query in
     let res = Rdf_sparql.execute
       ~base: (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) dataset q
     in
     match res with
       Rdf_sparql.Solutions sols ->
         Stog_msg.verbose ~level: 2
-          (Printf.sprintf "%d solutions for query %s" (List.length sols) query);
-        apply_sols env stog elt tmpl sep sols
+          (Printf.sprintf "%d solutions for query %s" (List.length sols) query.query);
+        apply_select_sols env stog elt query sols
     | _ ->
         failwith "rdf-select did not return solutions"
   with
     Rdf_sparql.Error e ->
       let msg = Rdf_sparql.string_of_error e in
-      failwith ("SPARQL:\n"^query^"\n"^msg)
+      failwith ("SPARQL:\n"^query.query^"\n"^msg)
   | e ->
       let msg = Printexc.to_string e in
-      failwith ("rdf-select:\n"^query^"\n"^msg)
+      failwith ("rdf-select:\n"^query.query^"\n"^msg)
+;;
+
+let fun_rdf_select stog elt_id elt env args subs =
+  let query = build_select_query stog elt env args subs in
+  if query.tmpl = [] then
+      failwith "Missing or empty template for rdf-select";
+  let query =
+    match query.query with
+      "" -> failwith "No query for rdf-select";
+    | s ->
+        (* add default namespaces as header *)
+        let s = List.fold_right
+          (fun (uri, s) acc ->
+             "PREFIX "^s^": <"^(Rdf_uri.string uri)^">\n"^acc)
+          (namespaces stog) s
+        in
+        { query with query = s }
+  in
+  exec_select stog elt env query
 ;;
 
 let rules_rdf_select stog elt_id elt =
