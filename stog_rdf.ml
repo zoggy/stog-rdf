@@ -421,7 +421,7 @@ let rec read_select_query_from_atts stog elt query = function
 | arg :: q ->
     let query =
       match arg with
-        (("", "with-contents"), _) -> query
+        (("", "with-xmls"), _) -> query
       | (("", "sep"), s) ->
           { query with separator = [Xtmpl.D s]}
       | (("", "query"), s) ->
@@ -441,9 +441,10 @@ let rec read_select_query_from_xmls stog elt query = function
   [] -> query
 | (Xtmpl.D _) :: q -> read_select_query_from_xmls stog elt query q
 | (Xtmpl.E (tag,_,xmls)) :: q ->
+    prerr_endline ("tag=("^(fst tag)^","^(snd tag)^")");
     let query =
       match tag with
-        ("", "contents") -> { query with tmpl = xmls }
+        ("", "tmpl") -> { query with tmpl = xmls }
       | ("", "sep") -> { query with separator = xmls}
       | ("", "query") -> { query with query = keep_pcdata xmls }
       | (prefix, tag) ->
@@ -458,7 +459,7 @@ let build_select_query stog elt env args subs =
   let q = { query = "" ; tmpl = [] ; separator = [] ; args = [] } in
   let q = read_select_query_from_atts stog elt q args in
   let q = { q with args = List.rev q.args } in
-  match Xtmpl.opt_arg args ~def: "false" ("", "with-contents") = "true" with
+  match Xtmpl.opt_arg args ~def: "false" ("", "with-xmls") = "true" with
     true -> read_select_query_from_xmls stog elt q subs
   | false ->
       match q.query with
