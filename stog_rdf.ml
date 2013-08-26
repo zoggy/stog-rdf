@@ -271,7 +271,7 @@ let parse_prop stog env g subject atts gstate subs =
         (("", Rdf_uri.string Rdf_rdf.rdf_resource), uri) :: atts
   in
   let state = {
-      Rdf_xml.subject = Some (Rdf_node.Uri subject) ;
+      Rdf_xml.subject = Some (Rdf_term.Uri subject) ;
       predicate = None ;
       xml_base = Rdf_uri.of_neturl stog.Stog_types.stog_base_url ;
       xml_lang = None ;
@@ -378,10 +378,10 @@ let output_graph _ stog _ =
 ;;
 
 let string_of_term = function
-  Rdf_node.Uri uri -> Rdf_uri.string uri
-| Rdf_node.Literal lit -> lit.Rdf_node.lit_value
-| Rdf_node.Blank -> "_"
-| Rdf_node.Blank_ id -> Rdf_node.string_of_blank_id id
+  Rdf_term.Uri uri -> Rdf_uri.string uri
+| Rdf_term.Literal lit -> lit.Rdf_term.lit_value
+| Rdf_term.Blank -> "_"
+| Rdf_term.Blank_ id -> Rdf_term.string_of_blank_id id
 
 
 type query_spec =
