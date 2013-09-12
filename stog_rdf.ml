@@ -65,7 +65,13 @@ let rdf_uri s =
 ;;
 
 let out_file = ref "graph.rdf";;
-let namespaces = ref None;;
+
+let namespaces_ = ref None;;
+let namespaces () =
+  match !namespaces_ with
+    Some ns -> ns
+  | None -> assert false
+;;
 
 module UMap = Rdf_uri.Urimap;;
 
@@ -100,7 +106,14 @@ let load_graph name src =
     try
       match src with
         Src_file s -> ignore(Rdf_ttl.from_file g name s)
-      | Src_str s -> ignore(Rdf_ttl.from_string g name s)
+      | Src_str s ->
+          let ttl =
+            List.fold_right
+              (fun (uri, s) acc ->
+                 "@prefix "^s^": <"^(Rdf_uri.string uri)^"> .\n"^acc)
+              (namespaces ()) s
+          in
+          ignore(Rdf_ttl.from_string g name ttl)
       | Src_url _ -> failwith "Fetching graphs is not implemented yet"
     with
       Rdf_ttl.Error e ->
@@ -124,7 +137,13 @@ let rule_load_graph rule_tag env args xmls =
         | Some s -> Src_url (rdf_uri s)
         | None ->
             match xmls with
-              [] -> failwith (rule_tag^": missing source or inline turtle code")
+              [] ->
+                let msg =
+                  rule_tag^
+                  ": missing source or inline turtle code when loading graph "^
+                  (Rdf_uri.string name)
+                in
+                failwith msg
             | _ ->
                 let ttl = keep_pcdata xmls in
                 Src_str ttl
@@ -161,17 +180,11 @@ let read_options stog =
     ]
     ns#get
   in
-  namespaces := Some ns ;
+  namespaces_ := Some ns ;
 
   List.iter
     (fun (uri, file) -> load_graph (rdf_uri uri) (Src_file file))
     src_files#get
-;;
-
-let namespaces stog =
-  match !namespaces with
-    Some ns -> ns
-  | None -> assert false
 ;;
 
 let init stog = read_options stog; stog ;;
@@ -243,7 +256,7 @@ let graph () =
   | None ->
       let stog = Stog_plug.stog () in
       let g = Rdf_graph.open_graph (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) in
-      let namespaces = namespaces stog in
+      let namespaces = namespaces () in
       let gstate = {
           Rdf_xml.blanks = Rdf_xml.SMap.empty ;
           gnamespaces = build_ns_map namespaces ;
@@ -411,7 +424,7 @@ let create_graph ?elt stog =
     | Some elt -> Stog_html.elt_url stog elt
   in
   let g = Rdf_graph.open_graph (Rdf_uri.of_neturl base_url) in
-  let namespaces = namespaces stog in
+  let namespaces = namespaces () in
   let gstate = {
       Rdf_xml.blanks = Rdf_xml.SMap.empty ;
       gnamespaces = build_ns_map namespaces ;
@@ -454,7 +467,7 @@ let make_graph env stog elt_id elt =
 
 let output_graph _ stog _ =
   let (g, _) = create_graph stog in
-  let namespaces = namespaces stog in
+  let namespaces = namespaces () in
   Str_map.iter (fun _ g_elt -> Rdf_graph.merge g g_elt) !graph_by_elt;
   let dot = Rdf_dot.dot_of_graph ~namespaces g in
   Stog_misc.file_of_string ~file:"/tmp/graph.dot" dot;
@@ -591,7 +604,7 @@ let fun_rdf_select stog elt_id elt env args subs =
         let s = List.fold_right
           (fun (uri, s) acc ->
              "PREFIX "^s^": <"^(Rdf_uri.string uri)^">\n"^acc)
-          (namespaces stog) s
+          (namespaces ()) s
         in
         { query with query = s }
   in
@@ -632,7 +645,7 @@ module Cache =
         with Not_found ->
             fst (create_graph ~elt stog)
       in
-      let namespaces = namespaces stog in
+      let namespaces = namespaces () in
       Rdf_xml.to_string ~namespaces g
   end;;
 
