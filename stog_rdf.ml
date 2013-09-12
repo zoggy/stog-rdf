@@ -54,7 +54,10 @@ let graph_by_elt = ref Str_map.empty;;
 
 let rdf_uri s =
   try Rdf_uri.uri s
-  with e ->
+  with
+  | Rdf_uri.Invalid_url s ->
+      failwith ("Invalid url "^s)
+  | e ->
       let msg = Printf.sprintf "While making uri from %S: %s" s
         (Printexc.to_string e)
       in
@@ -63,7 +66,74 @@ let rdf_uri s =
 
 let out_file = ref "graph.rdf";;
 let namespaces = ref None;;
-let read_namespaces stog =
+
+module UMap = Rdf_uri.Urimap;;
+
+let loaded_graphs = ref UMap.empty;;
+
+type source =
+  | Src_file of string
+  | Src_url of Rdf_uri.uri
+  | Src_str of string
+;;
+
+let string_of_source = function
+  Src_file f -> "file " ^ f
+| Src_url u -> "url " ^ (Rdf_uri.string u)
+| Src_str _ -> "<inline code>"
+;;
+
+let add_loaded_graph name g = loaded_graphs := UMap.add name g !loaded_graphs;;
+
+let get_loaded_graph name =
+  try UMap.find name !loaded_graphs
+  with _ -> failwith ("Graph "^(Rdf_uri.string name)^" not loaded.")
+;;
+
+let load_graph name src =
+  Stog_plug.verbose (Printf.sprintf "Load graph from "^(string_of_source src)^" ...");
+  let g =
+    try get_loaded_graph name
+    with _ -> Rdf_graph.open_graph name
+  in
+  begin
+    try
+      match src with
+        Src_file s -> ignore(Rdf_ttl.from_file g name s)
+      | Src_str s -> ignore(Rdf_ttl.from_string g name s)
+      | Src_url _ -> failwith "Fetching graphs is not implemented yet"
+    with
+      Rdf_ttl.Error e ->
+        failwith (Rdf_ttl.string_of_error e)
+  end;
+  add_loaded_graph name g;
+  Stog_plug.verbose "done"
+;;
+
+let rule_load_graph rule_tag env args xmls =
+  let name =
+     match Xtmpl.get_arg args ("", "name") with
+       None -> failwith (rule_tag^": missing name attribute")
+     | Some s -> rdf_uri s
+  in
+  let src =
+    match Xtmpl.get_arg args ("", "file") with
+      Some file -> Src_file file
+    | None ->
+        match Xtmpl.get_arg args ("", "url") with
+        | Some s -> Src_url (rdf_uri s)
+        | None ->
+            match xmls with
+              [] -> failwith (rule_tag^": missing source or inline turtle code")
+            | _ ->
+                let ttl = keep_pcdata xmls in
+                Src_str ttl
+  in
+  load_graph name src;
+  []
+;;
+
+let read_options stog =
   let module CF = Config_file in
   let group = new CF.group in
   let ns = new CF.list_cp
@@ -73,26 +143,39 @@ let read_namespaces stog =
   let graph_file = new CF.string_cp ~group ["graph_file"] !out_file
     "name of main graph output file"
   in
+  let src_files = new CF.list_cp
+    (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers) ~group
+    ["sources" ; "files"] []
+    "pairs (uri, file) specifying graphs to load from files and associate to uris"
+  in
   let rc_file = rc_file stog in
   group#read rc_file;
   group#write rc_file;
+
   out_file := graph_file#get;
-  List.fold_left
+
+  let ns = List.fold_left
     (fun acc (uri, name) -> (rdf_uri uri, name) :: acc)
     [ Rdf_uri.of_neturl stog.Stog_types.stog_base_url, "site" ;
       Rdf_rdf.rdf_ "", "rdf" ;
     ]
     ns#get
+  in
+  namespaces := Some ns ;
+
+  List.iter
+    (fun (uri, file) -> load_graph (rdf_uri uri) (Src_file file))
+    src_files#get
 ;;
 
 let namespaces stog =
   match !namespaces with
     Some ns -> ns
-  | None ->
-      let ns = read_namespaces stog in
-      namespaces := Some ns;
-      ns
+  | None -> assert false
 ;;
+
+let init stog = read_options stog; stog ;;
+let () = Stog_plug.register_stage0_fun init;;
 
 let build_ns_map namespaces =
   let pred uri name uri2 name2 =
@@ -182,10 +265,15 @@ let dataset stog =
           None -> failwith "No final graph!"
         | Some g -> g
       in
+      let loaded =
+        UMap.fold
+          (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
+          !loaded_graphs []
+      in
       let named =
         Str_map.fold
           (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
-          !graph_by_elt []
+          !graph_by_elt loaded
       in
       let d = Rdf_ds.simple_dataset ~named g in
       set_dataset d;
@@ -441,7 +529,7 @@ let rec read_select_query_from_xmls stog elt query = function
   [] -> query
 | (Xtmpl.D _) :: q -> read_select_query_from_xmls stog elt query q
 | (Xtmpl.E (tag,_,xmls)) :: q ->
-    prerr_endline ("tag=("^(fst tag)^","^(snd tag)^")");
+    (*prerr_endline ("tag=("^(fst tag)^","^(snd tag)^")");*)
     let query =
       match tag with
         ("", "tmpl") -> { query with tmpl = xmls }
@@ -515,10 +603,12 @@ let rules_rdf_select stog elt_id elt =
   (("", "rdf-select"), fun_rdf_select stog elt_id elt) :: rules
 ;;
 
-
+let rules_rdf_load stog elt_id elt =
+  [ ("", "rdf-load"), (rule_load_graph "rdf-load") ];;
 
 let () = Stog_plug.register_level_fun 200 make_graph;;
 let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
+let () = Stog_plug.register_level_fun 202 (Stog_html.compute_elt rules_rdf_load);;
 let () = Stog_plug.register_level_fun 220 (Stog_html.compute_elt rules_rdf_select);;
 
 
