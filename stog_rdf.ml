@@ -52,11 +52,11 @@ let keep_pcdata =
 
 let graph_by_elt = ref Str_map.empty;;
 
-let rdf_uri s =
-  try Rdf_uri.uri s
+let rdf_iri s =
+  try Rdf_iri.iri s
   with
-  | Rdf_uri.Invalid_url s ->
-      failwith ("Invalid url "^s)
+  | Rdf_iri.Invalid_iri (s, msg) ->
+      failwith ("Invalid IRI "^s^" ("^msg^")")
   | e ->
       let msg = Printf.sprintf "While making uri from %S: %s" s
         (Printexc.to_string e)
@@ -73,27 +73,27 @@ let namespaces () =
   | None -> assert false
 ;;
 
-module UMap = Rdf_uri.Urimap;;
+module IMap = Rdf_iri.Irimap;;
 
-let loaded_graphs = ref UMap.empty;;
+let loaded_graphs = ref IMap.empty;;
 
 type source =
   | Src_file of string
-  | Src_url of Rdf_uri.uri
+  | Src_iri of Rdf_iri.iri
   | Src_str of string
 ;;
 
 let string_of_source = function
   Src_file f -> "file " ^ f
-| Src_url u -> "url " ^ (Rdf_uri.string u)
+| Src_iri i -> "iri " ^ (Rdf_iri.string i)
 | Src_str _ -> "<inline code>"
 ;;
 
-let add_loaded_graph name g = loaded_graphs := UMap.add name g !loaded_graphs;;
+let add_loaded_graph name g = loaded_graphs := IMap.add name g !loaded_graphs;;
 
 let get_loaded_graph name =
-  try UMap.find name !loaded_graphs
-  with _ -> failwith ("Graph "^(Rdf_uri.string name)^" not loaded.")
+  try IMap.find name !loaded_graphs
+  with _ -> failwith ("Graph "^(Rdf_iri.string name)^" not loaded.")
 ;;
 
 let load_graph name src =
@@ -105,16 +105,16 @@ let load_graph name src =
   begin
     try
       match src with
-        Src_file s -> ignore(Rdf_ttl.from_file g name s)
+        Src_file s -> ignore(Rdf_ttl.from_file g s)
       | Src_str s ->
           let ttl =
             List.fold_right
-              (fun (uri, s) acc ->
-                 "@prefix "^s^": <"^(Rdf_uri.string uri)^"> .\n"^acc)
+              (fun (iri, s) acc ->
+                 "@prefix "^s^": <"^(Rdf_iri.string iri)^"> .\n"^acc)
               (namespaces ()) s
           in
-          ignore(Rdf_ttl.from_string g name ttl)
-      | Src_url _ -> failwith "Fetching graphs is not implemented yet"
+          ignore(Rdf_ttl.from_string g ttl)
+      | Src_iri _ -> failwith "Fetching graphs is not implemented yet"
     with
       Rdf_ttl.Error e ->
         failwith (Rdf_ttl.string_of_error e)
@@ -127,21 +127,21 @@ let rule_load_graph rule_tag env args xmls =
   let name =
      match Xtmpl.get_arg args ("", "name") with
        None -> failwith (rule_tag^": missing name attribute")
-     | Some s -> rdf_uri s
+     | Some s -> rdf_iri s
   in
   let src =
     match Xtmpl.get_arg args ("", "file") with
       Some file -> Src_file file
     | None ->
         match Xtmpl.get_arg args ("", "url") with
-        | Some s -> Src_url (rdf_uri s)
+        | Some s -> Src_iri (rdf_iri s)
         | None ->
             match xmls with
               [] ->
                 let msg =
                   rule_tag^
                   ": missing source or inline turtle code when loading graph "^
-                  (Rdf_uri.string name)
+                  (Rdf_iri.string name)
                 in
                 failwith msg
             | _ ->
@@ -174,8 +174,8 @@ let read_options stog =
   out_file := graph_file#get;
 
   let ns = List.fold_left
-    (fun acc (uri, name) -> (rdf_uri uri, name) :: acc)
-    [ Rdf_uri.of_neturl stog.Stog_types.stog_base_url, "site" ;
+    (fun acc (iri, name) -> (rdf_iri iri, name) :: acc)
+    [ Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url), "site" ;
       Rdf_rdf.rdf_ "", "rdf" ;
     ]
     ns#get
@@ -183,7 +183,7 @@ let read_options stog =
   namespaces_ := Some ns ;
 
   List.iter
-    (fun (uri, file) -> load_graph (rdf_uri uri) (Src_file file))
+    (fun (iri, file) -> load_graph (rdf_iri iri) (Src_file file))
     src_files#get
 ;;
 
@@ -191,30 +191,30 @@ let init stog = read_options stog; stog ;;
 let () = Stog_plug.register_stage0_fun init;;
 
 let build_ns_map namespaces =
-  let pred uri name uri2 name2 =
-    name = name2 && not (Rdf_uri.equal uri uri2)
+  let pred iri name iri2 name2 =
+    name = name2 && not (Rdf_iri.equal iri iri2)
   in
-  let f map (uri, name) =
+  let f map (iri, name) =
     try
-      let name2 = Rdf_uri.Urimap.find uri map in
+      let name2 = IMap.find iri map in
       let msg = Printf.sprintf "%S is already associated to name %S"
-        (Rdf_uri.string uri) name2
+        (Rdf_iri.string iri) name2
       in
       failwith msg
     with
       Not_found ->
-        if Rdf_uri.Urimap.exists (pred uri name) map then
+        if IMap.exists (pred iri name) map then
           (
            let msg = Printf.sprintf
-             "Namespace %S already associated to an url different from %S"
-             name (Rdf_uri.string uri)
+             "Namespace %S already associated to an IRI different from %S"
+             name (Rdf_iri.string iri)
            in
            failwith msg
           )
         else
-          Rdf_uri.Urimap.add uri name map
+          IMap.add iri name map
   in
-  List.fold_left f Rdf_uri.Urimap.empty namespaces
+  List.fold_left f IMap.empty namespaces
 ;;
 
 let apply_namespaces =
@@ -226,7 +226,7 @@ let apply_namespaces =
       dbg ~level: 2 (fun () -> "map_qn pref="^pref^", s="^s);
       try
         let p = Rdf_xml.SMap.find pref ns in
-        (Rdf_uri.string p, s)
+        (Rdf_iri.string p, s)
       with Not_found ->
           dbg ~level: 2 (fun () -> "not found");
           (pref, s)
@@ -241,8 +241,8 @@ let apply_namespaces =
        Rdf_xml.E ((tag, atts), subs)
   in
   fun ns xml ->
-    let ns = Rdf_uri.Urimap.fold
-      (fun uri pref map -> Rdf_xml.SMap.add pref uri map)
+    let ns = IMap.fold
+      (fun iri pref map -> Rdf_xml.SMap.add pref iri map)
        ns Rdf_xml.SMap.empty
     in
     iter ns xml
@@ -255,7 +255,7 @@ let graph () =
     Some x -> x
   | None ->
       let stog = Stog_plug.stog () in
-      let g = Rdf_graph.open_graph (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) in
+      let g = Rdf_graph.open_graph (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url)) in
       let namespaces = namespaces () in
       let gstate = {
           Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -279,7 +279,7 @@ let dataset stog =
         | Some g -> g
       in
       let loaded =
-        UMap.fold
+        IMap.fold
           (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
           !loaded_graphs []
       in
@@ -349,7 +349,7 @@ let prerr_atts l =
 
 let parse_prop stog env g subject atts gstate subs =
   let subject =
-    try Rdf_uri.uri (List.assoc ("","subject") atts)
+    try Rdf_iri.iri (List.assoc ("","subject") atts)
     with Not_found -> subject
   in
   let pred =
@@ -369,15 +369,15 @@ let parse_prop stog env g subject atts gstate subs =
     match rdf_resource with
       None -> atts
     | Some uri ->
-        (("", Rdf_uri.string Rdf_rdf.rdf_resource), uri) :: atts
+        (("", Rdf_iri.string Rdf_rdf.rdf_resource), uri) :: atts
   in
   let state = {
-      Rdf_xml.subject = Some (Rdf_term.Uri subject) ;
+      Rdf_xml.subject = Some (Rdf_term.Iri subject) ;
       predicate = None ;
-      xml_base = Rdf_uri.of_neturl stog.Stog_types.stog_base_url ;
+      xml_base = Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) ;
       xml_lang = None ;
       datatype = None ;
-      namespaces = gstate.Rdf_xml.gnamespaces ; (*Rdf_uri.Urimap.empty ;*)
+      namespaces = gstate.Rdf_xml.gnamespaces ; (*IMap.empty ;*)
     }
   in
   let subs = List.map map_to_rdf_xml_tree subs in
@@ -400,7 +400,7 @@ let gather =
             None -> elt_url
           | Some id -> Neturl.modify_url ~fragment: id elt_url
         in
-        Rdf_uri.of_neturl uri
+        Rdf_iri.of_uri (Rdf_uri.of_neturl uri)
       in
       parse_prop stog env g subject atts gstate subs
   | Xtmpl.E (_, atts, subs) ->
@@ -423,7 +423,7 @@ let create_graph ?elt stog =
       None -> stog.Stog_types.stog_base_url
     | Some elt -> Stog_html.elt_url stog elt
   in
-  let g = Rdf_graph.open_graph (Rdf_uri.of_neturl base_url) in
+  let g = Rdf_graph.open_graph (Rdf_iri.of_uri (Rdf_uri.of_neturl base_url)) in
   let namespaces = namespaces () in
   let gstate = {
       Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -479,7 +479,7 @@ let output_graph _ stog _ =
 ;;
 
 let string_of_term = function
-  Rdf_term.Uri uri -> Rdf_uri.string uri
+  Rdf_term.Iri iri -> Rdf_iri.string iri
 | Rdf_term.Literal lit -> lit.Rdf_term.lit_value
 | Rdf_term.Blank -> "_"
 | Rdf_term.Blank_ id -> Rdf_term.string_of_blank_id id
@@ -572,9 +572,10 @@ let exec_select stog elt env query =
   try
     let dataset = dataset () in
     (*Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";*)
-    let q = Rdf_sparql.parse_from_string query.query in
+    let q = Rdf_sparql.query_from_string query.query in
     let res = Rdf_sparql.execute
-      ~base: (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) dataset q
+      ~base: (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url))
+      dataset q
     in
     match res with
       Rdf_sparql.Solutions sols ->
@@ -602,8 +603,8 @@ let fun_rdf_select stog elt_id elt env args subs =
     | s ->
         (* add default namespaces as header *)
         let s = List.fold_right
-          (fun (uri, s) acc ->
-             "PREFIX "^s^": <"^(Rdf_uri.string uri)^">\n"^acc)
+          (fun (iri, s) acc ->
+             "PREFIX "^s^": <"^(Rdf_iri.string iri)^">\n"^acc)
           (namespaces ()) s
         in
         { query with query = s }
@@ -634,7 +635,7 @@ module Cache =
     let load elt xml =
       let stog = Stog_plug.stog () in
       let (g,_) = create_graph ~elt stog in
-      let base = Rdf_uri.of_neturl (Stog_html.elt_url stog elt) in
+      let base = Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_html.elt_url stog elt)) in
       Rdf_xml.from_string g ~base xml ;
       add_elt_graph elt g
 
