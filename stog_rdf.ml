@@ -27,7 +27,7 @@
 (*********************************************************************************)
 
 (** RDF Plugin.
-  Handle [<rdf>] nodes to create an RDF graph for the site.
+  Handle [<rdf*>] nodes to create and RDF graphs.
 *)
 
 open Stog_types;;
@@ -96,59 +96,79 @@ let get_loaded_graph name =
   with _ -> failwith ("Graph "^(Rdf_iri.string name)^" not loaded.")
 ;;
 
-let load_graph name src =
-  Stog_plug.verbose (Printf.sprintf "Load graph from "^(string_of_source src)^" ...");
+let load_graph ?elt name ?data options =
+  Stog_plug.verbose ("Load graph "^(Rdf_iri.string name)^"...");
+  Stog_plug.verbose ~level:2
+    ("Options:"^
+     (String.concat ", "
+      (List.map(fun (n,v) -> n^"="^v) options)));
+
   let g =
     try get_loaded_graph name
-    with _ -> Rdf_graph.open_graph name
+    with _ ->
+        let file =
+          try Some (List.assoc "file" options)
+          with Not_found -> None
+        in
+        match file with
+          None ->
+            begin
+              match data with
+                None -> Rdf_graph.open_graph ~options name
+              | Some s ->
+                  try
+                    let g = Rdf_graph.open_graph name in
+                    let ttl =
+                      List.fold_right
+                        (fun (iri, s) acc ->
+                           "@prefix "^s^": <"^(Rdf_iri.string iri)^"> .\n"^acc)
+                        (namespaces ()) s
+                    in
+                    Rdf_ttl.from_string g ttl;
+                    g
+                  with
+                    Rdf_ttl.Error e ->
+                      failwith (Rdf_ttl.string_of_error e)
+            end
+        | Some file ->
+            try
+              let file =
+                match elt with
+                  None -> file
+                | Some elt ->
+                    if Filename.is_relative file && Filename.is_implicit file then
+                      Filename.concat (Filename.dirname elt.Stog_types.elt_src) file
+                    else
+                      file
+              in
+              let g = Rdf_graph.open_graph name in
+              Rdf_ttl.from_file g file;
+              g
+            with
+              Rdf_ttl.Error e ->
+                failwith (Rdf_ttl.string_of_error e)
   in
-  begin
-    try
-      match src with
-        Src_file s -> ignore(Rdf_ttl.from_file g s)
-      | Src_str s ->
-          let ttl =
-            List.fold_right
-              (fun (iri, s) acc ->
-                 "@prefix "^s^": <"^(Rdf_iri.string iri)^"> .\n"^acc)
-              (namespaces ()) s
-          in
-          ignore(Rdf_ttl.from_string g ttl)
-      | Src_iri _ -> failwith "Fetching graphs is not implemented yet"
-    with
-      Rdf_ttl.Error e ->
-        failwith (Rdf_ttl.string_of_error e)
-  end;
   add_loaded_graph name g;
   Stog_plug.verbose "done"
 ;;
 
-let rule_load_graph rule_tag env args xmls =
+let rule_load_graph rule_tag stog elt env args xmls =
   let name =
      match Xtmpl.get_arg args ("", "name") with
        None -> failwith (rule_tag^": missing name attribute")
      | Some s -> rdf_iri s
   in
-  let src =
-    match Xtmpl.get_arg args ("", "file") with
-      Some file -> Src_file file
-    | None ->
-        match Xtmpl.get_arg args ("", "url") with
-        | Some s -> Src_iri (rdf_iri s)
-        | None ->
-            match xmls with
-              [] ->
-                let msg =
-                  rule_tag^
-                  ": missing source or inline turtle code when loading graph "^
-                  (Rdf_iri.string name)
-                in
-                failwith msg
-            | _ ->
-                let ttl = keep_pcdata xmls in
-                Src_str ttl
+  let options =
+    List.fold_left
+      (fun acc (op,v) ->
+         match op with
+           ("","name") -> acc
+         | ("",s) -> (s, v) :: acc
+         | _ -> acc)
+      [] args
   in
-  load_graph name src;
+  let data = match xmls with [] -> None | _ -> Some (keep_pcdata xmls) in
+  load_graph ~elt name ?data options;
   []
 ;;
 
@@ -162,10 +182,12 @@ let read_options stog =
   let graph_file = new CF.string_cp ~group ["graph_file"] !out_file
     "name of main graph output file"
   in
-  let src_files = new CF.list_cp
-    (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers) ~group
-    ["sources" ; "files"] []
-    "pairs (uri, file) specifying graphs to load from files and associate to uris"
+  let sources = new CF.list_cp
+    (CF.tuple2_wrappers CF.string_wrappers
+     (CF.list_wrappers (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers)))
+      ~group
+      ["sources"] []
+      "pairs (uri, options) specifying graphs to load and associate to uris. Options is a list of pair (name, value). To load a load, use [\"file\", \"myfile.ttl\"]. Other options can be given to access graphs from a database (see OCaml-RDF's Rdf_graph documentation)"
   in
   let rc_file = rc_file stog in
   group#read rc_file;
@@ -183,8 +205,8 @@ let read_options stog =
   namespaces_ := Some ns ;
 
   List.iter
-    (fun (iri, file) -> load_graph (rdf_iri iri) (Src_file file))
-    src_files#get
+    (fun (iri, options) -> load_graph (rdf_iri iri) options)
+    sources#get
 ;;
 
 let init stog = read_options stog; stog ;;
@@ -573,6 +595,7 @@ let exec_select stog elt env query =
     let dataset = dataset () in
     (*Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";*)
     let q = Rdf_sparql.query_from_string query.query in
+    (*prerr_endline ("query: "^query.query);*)
     let res = Rdf_sparql.execute
       ~base: (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url))
       dataset q
@@ -618,7 +641,7 @@ let rules_rdf_select stog elt_id elt =
 ;;
 
 let rules_rdf_load stog elt_id elt =
-  [ ("", "rdf-load"), (rule_load_graph "rdf-load") ];;
+  [ ("", "rdf-load"), (rule_load_graph "rdf-load" stog elt) ];;
 
 let () = Stog_plug.register_level_fun 200 make_graph;;
 let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
