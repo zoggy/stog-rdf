@@ -96,6 +96,7 @@ let get_loaded_graph name =
   with _ -> failwith ("Graph "^(Rdf_iri.string name)^" not loaded.")
 ;;
 
+
 let load_graph ?elt name ?data options =
   Stog_plug.verbose ("Load graph "^(Rdf_iri.string name)^"...");
   Stog_plug.verbose ~level:2
@@ -142,11 +143,21 @@ let load_graph ?elt name ?data options =
                       file
               in
               let g = Rdf_graph.open_graph name in
-              Rdf_ttl.from_file g file;
+              let from =
+                match
+                  try String.lowercase (List.assoc "format" options)
+                  with Not_found -> ""
+                with
+                  "rdf/xml" -> Rdf_xml.from_file
+                | _ -> Rdf_ttl.from_file
+              in
+              from g file ;
               g
             with
-              Rdf_ttl.Error e ->
+            | Rdf_ttl.Error e ->
                 failwith (Rdf_ttl.string_of_error e)
+            | Rdf_xml.Invalid_rdf s ->
+                failwith ("Invalid RDF: "^s)
   in
   add_loaded_graph name g;
   Stog_plug.verbose "done"
