@@ -652,7 +652,9 @@ let rules_rdf_select stog elt_id elt =
 ;;
 
 let rules_rdf_load stog elt_id elt =
-  [ ("", "rdf-load"), (rule_load_graph "rdf-load" stog elt) ];;
+  [ ("", "rdf"), (fun _ _ _ -> []) ;
+    ("", "rdf-load"), (rule_load_graph "rdf-load" stog elt) ;
+  ];;
 
 let () = Stog_plug.register_level_fun 200 make_graph;;
 let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
