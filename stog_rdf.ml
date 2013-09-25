@@ -502,11 +502,11 @@ let output_graph _ stog _ =
   let (g, _) = create_graph stog in
   let namespaces = namespaces () in
   Str_map.iter (fun _ g_elt -> Rdf_graph.merge g g_elt) !graph_by_elt;
-  let dot = Rdf_dot.dot_of_graph ~namespaces g in
-  Stog_misc.file_of_string ~file:"/tmp/graph.dot" dot;
   let out_file = Filename.concat stog.Stog_types.stog_outdir !out_file in
   Rdf_xml.to_file ~namespaces g out_file;
   Stog_plug.verbose (Printf.sprintf "RDF graph dumped into %S" out_file);
+  let dot = Rdf_dot.dot_of_graph ~namespaces g in
+  Stog_misc.file_of_string ~file: ((Filename.chop_extension out_file)^".dot") dot;
   final_graph := Some g;
   []
 ;;
