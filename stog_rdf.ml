@@ -679,8 +679,6 @@ let () = Stog_plug.register_level_fun 202 (Stog_html.compute_elt rules_rdf_load)
 let () = Stog_plug.register_level_fun 220 (Stog_html.compute_elt rules_rdf_select);;
 
 
-
-
 module Cache =
   struct
     type t = string
