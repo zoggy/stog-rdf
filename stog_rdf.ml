@@ -511,12 +511,23 @@ let output_graph _ stog _ =
   []
 ;;
 
-let string_of_term = function
-  Rdf_term.Iri iri -> Rdf_iri.string iri
-| Rdf_term.Literal lit -> lit.Rdf_term.lit_value
-| Rdf_term.Blank -> "_"
-| Rdf_term.Blank_ id -> Rdf_term.string_of_blank_id id
+let rdf_string_of_term = Rdf_term.string_of_term ;;
 
+let string_of_term t =
+  match Rdf_dt.of_term t with
+  | Rdf_dt.Err e -> Rdf_dt.string_of_error e
+  | Rdf_dt.Blank s -> "_:"^s
+  | Rdf_dt.Iri iri -> Rdf_iri.string iri
+  | Rdf_dt.String s -> s
+  | Rdf_dt.Int n -> string_of_int n
+  |	Rdf_dt.Float f -> string_of_float f
+  | Rdf_dt.Bool true -> "true"
+  | Rdf_dt.Bool false -> "false"
+  |	Rdf_dt.Datetime netdate ->
+      Netdate.format ~fmt: Rdf_dt.date_fmt netdate
+  | Rdf_dt.Ltrl (s,_) -> s
+  | Rdf_dt.Ltrdt (s, _) -> s
+;;
 
 type query_spec =
   { query : string ;
@@ -526,9 +537,18 @@ type query_spec =
   }
 
 let apply_select_sol env stog elt tmpl sol =
+  let esc f s =
+    let s = Xtmpl.string_of_xml (Xtmpl.D (f s)) in
+    prerr_endline s;
+    s
+  in
   let atts =
     Rdf_sparql.solution_fold
-      (fun name term acc -> (("", name), string_of_term term)::acc)
+      (fun name term acc ->
+         (("", name), esc string_of_term term) ::
+         (("", name^"_rdf"), esc rdf_string_of_term term) ::
+         acc
+      )
       sol
       []
   in
