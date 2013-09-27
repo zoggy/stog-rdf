@@ -555,7 +555,6 @@ let rec read_select_query_from_atts stog elt query = function
 | arg :: q ->
     let query =
       match arg with
-        (("", "with-xmls"), _) -> query
       | (("", "sep"), s) ->
           { query with separator = [Xtmpl.D s]}
       | (("", "query"), s) ->
@@ -593,12 +592,14 @@ let build_select_query stog elt env args subs =
   let q = { query = "" ; tmpl = [] ; separator = [] ; args = [] } in
   let q = read_select_query_from_atts stog elt q args in
   let q = { q with args = List.rev q.args } in
-  match Xtmpl.opt_arg args ~def: "false" ("", "with-xmls") = "true" with
-    true -> read_select_query_from_xmls stog elt q subs
-  | false ->
-      match q.query with
-        "" -> { q with query = keep_pcdata subs }
-      | _ -> q
+  let with_xmls = List.exists
+    (function Xtmpl.E _ -> true | _ -> false)
+    subs
+  in
+  match with_xmls, subs with
+    true, _ -> read_select_query_from_xmls stog elt q subs
+  | false, [] -> q
+  | false, _ -> { q with query = keep_pcdata subs }
 ;;
 
 let exec_select stog elt env query =
