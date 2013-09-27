@@ -537,11 +537,7 @@ type query_spec =
   }
 
 let apply_select_sol env stog elt tmpl sol =
-  let esc f s =
-    let s = Xtmpl.string_of_xml (Xtmpl.D (f s)) in
-    prerr_endline s;
-    s
-  in
+  let esc f s = Xtmpl.string_of_xml (Xtmpl.D (f s)) in
   let atts =
     Rdf_sparql.solution_fold
       (fun name term acc ->
