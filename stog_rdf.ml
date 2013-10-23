@@ -508,7 +508,7 @@ let output_graph _ stog _ =
   let dot = Rdf_dot.dot_of_graph ~namespaces g in
   Stog_misc.file_of_string ~file: ((Filename.chop_extension out_file)^".dot") dot;
   final_graph := Some g;
-  []
+  [], []
 ;;
 
 let rdf_string_of_term = Rdf_term.string_of_term ;;
