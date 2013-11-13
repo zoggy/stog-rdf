@@ -40,7 +40,6 @@ let plugin_name = "rdf";;
 
 let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
 
-
 let keep_pcdata =
   let rec iter b = function
     [] -> Buffer.contents b
@@ -50,32 +49,26 @@ let keep_pcdata =
   fun xmls -> iter (Buffer.create 256) xmls
 ;;
 
-let graph_by_elt = ref Str_map.empty;;
-
-let rdf_iri s =
-  try Rdf_iri.iri s
-  with
-  | Rdf_iri.Invalid_iri (s, msg) ->
-      failwith ("Invalid IRI "^s^" ("^msg^")")
-  | e ->
-      let msg = Printf.sprintf "While making uri from %S: %s" s
-        (Printexc.to_string e)
-      in
-      failwith msg
-;;
-
-let out_file = ref "graph.rdf";;
-
-let namespaces_ = ref None;;
-let namespaces () =
-  match !namespaces_ with
-    Some ns -> ns
-  | None -> assert false
-;;
-
 module IMap = Rdf_iri.Irimap;;
 
-let loaded_graphs = ref IMap.empty;;
+type rdf_data =
+  {
+    out_file : string ;
+    graph_by_elt : Rdf_graph.graph Stog_types.Hid_map.t;
+    namespaces : (Rdf_iri.iri * string) list option ;
+    loaded_graphs : Rdf_graph.graph IMap.t ;
+    graph : (Rdf_graph.graph * Rdf_xml.global_state) option ;
+  }
+
+let data_empty =
+  {
+    out_file = "graph.rdf" ;
+    graph_by_elt = Stog_types.Hid_map.empty ;
+    namespaces = None ;
+    loaded_graphs = IMap.empty ;
+    graph = None ;
+  }
+;;
 
 type source =
   | Src_file of string
@@ -89,15 +82,35 @@ let string_of_source = function
 | Src_str _ -> "<inline code>"
 ;;
 
-let add_loaded_graph name g = loaded_graphs := IMap.add name g !loaded_graphs;;
+let rdf_iri s =
+  try Rdf_iri.iri s
+  with
+  | Rdf_iri.Invalid_iri (s, msg) ->
+      failwith ("Invalid IRI "^s^" ("^msg^")")
+  | e ->
+      let msg = Printf.sprintf "While making uri from %S: %s" s
+        (Printexc.to_string e)
+      in
+      failwith msg
+;;
 
-let get_loaded_graph name =
-  try IMap.find name !loaded_graphs
-  with _ -> failwith ("Graph "^(Rdf_iri.string name)^" not loaded.")
+let namespaces data =
+  match data.namespaces with
+    Some ns -> ns
+  | None -> assert false
 ;;
 
 
-let load_graph ?elt name ?data options =
+let add_loaded_graph data name g =
+  { data with loaded_graphs = IMap.add name g data.loaded_graphs }
+;;
+
+let get_loaded_graph data name =
+  try IMap.find name data.loaded_graphs
+  with _ -> failwith ("Graph "^(Rdf_iri.string name)^" not loaded.")
+;;
+
+let load_graph acc_data ?elt name ?data options =
   Stog_plug.verbose ("Load graph "^(Rdf_iri.string name)^"...");
   Stog_plug.verbose ~level:2
     ("Options:"^
@@ -105,7 +118,7 @@ let load_graph ?elt name ?data options =
       (List.map(fun (n,v) -> n^"="^v) options)));
 
   let g =
-    try get_loaded_graph name
+    try get_loaded_graph acc_data name
     with _ ->
         let file =
           try Some (List.assoc "file" options)
@@ -123,7 +136,7 @@ let load_graph ?elt name ?data options =
                       List.fold_right
                         (fun (iri, s) acc ->
                            "@prefix "^s^": <"^(Rdf_iri.string iri)^"> .\n"^acc)
-                        (namespaces ()) s
+                        (namespaces acc_data) s
                     in
                     Rdf_ttl.from_string g ttl;
                     g
@@ -159,11 +172,12 @@ let load_graph ?elt name ?data options =
             | Rdf_xml.Invalid_rdf s ->
                 failwith ("Invalid RDF: "^s)
   in
-  add_loaded_graph name g;
-  Stog_plug.verbose "done"
+  let acc_data = add_loaded_graph acc_data name g in
+  Stog_plug.verbose "done";
+  acc_data
 ;;
 
-let rule_load_graph rule_tag stog elt env args xmls =
+let rule_load_graph rule_tag elt (stog, acc_data) env args xmls =
   let name =
      match Xtmpl.get_arg args ("", "name") with
        None -> failwith (rule_tag^": missing name attribute")
@@ -179,18 +193,18 @@ let rule_load_graph rule_tag stog elt env args xmls =
       [] args
   in
   let data = match xmls with [] -> None | _ -> Some (keep_pcdata xmls) in
-  load_graph ~elt name ?data options;
-  []
+  let acc_data = load_graph acc_data ~elt name ?data options in
+  ((stog, acc_data), [])
 ;;
 
-let read_options stog =
+let read_options (stog,data) =
   let module CF = Config_file in
   let group = new CF.group in
   let ns = new CF.list_cp
     (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers) ~group
     ["namespaces"] [] "pairs (uri, name) specifying namespaces"
   in
-  let graph_file = new CF.string_cp ~group ["graph_file"] !out_file
+  let graph_file = new CF.string_cp ~group ["graph_file"] data.out_file
     "name of main graph output file"
   in
   let sources = new CF.list_cp
@@ -204,7 +218,7 @@ let read_options stog =
   group#read rc_file;
   group#write rc_file;
 
-  out_file := graph_file#get;
+  let data = { data with out_file = graph_file#get } in
 
   let ns = List.fold_left
     (fun acc (iri, name) -> (rdf_iri iri, name) :: acc)
@@ -213,15 +227,16 @@ let read_options stog =
     ]
     ns#get
   in
-  namespaces_ := Some ns ;
-
-  List.iter
-    (fun (iri, options) -> load_graph (rdf_iri iri) options)
-    sources#get
+  let data = { data with namespaces = Some ns } in
+  let data = List.fold_left
+    (fun data (iri, options) -> load_graph data (rdf_iri iri) options)
+      data sources#get
+  in
+  (stog, data)
 ;;
 
-let init stog = read_options stog; stog ;;
-let () = Stog_plug.register_stage0_fun init;;
+let init env (stog,data) _ = read_options (stog,data);;
+let fun_level_init = Stog_engine.Fun_stog_data init;;
 
 let build_ns_map namespaces =
   let pred iri name iri2 name2 =
@@ -281,22 +296,22 @@ let apply_namespaces =
     iter ns xml
 ;;
 
-let graph = ref None;;
-let set_graph x = graph := Some x;;
-let graph () =
-  match !graph with
-    Some x -> x
+let set_graph data x = { data with graph = Some x } ;;
+let graph (stog, data) =
+  match data.graph with
+    Some x -> ((stog,data), x)
   | None ->
-      let stog = Stog_plug.stog () in
-      let g = Rdf_graph.open_graph (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url)) in
-      let namespaces = namespaces () in
+      let g = Rdf_graph.open_graph
+        (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url))
+      in
+      let namespaces = namespaces data in
       let gstate = {
           Rdf_xml.blanks = Rdf_xml.SMap.empty ;
           gnamespaces = build_ns_map namespaces ;
         }
       in
-      set_graph (g, gstate);
-      (g, gstate)
+      let data = set_graph data (g, gstate) in
+      ((stog, data), (g, gstate))
 ;;
 let final_graph = ref None;;
 
