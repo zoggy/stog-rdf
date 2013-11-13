@@ -58,6 +58,8 @@ type rdf_data =
     namespaces : (Rdf_iri.iri * string) list option ;
     loaded_graphs : Rdf_graph.graph IMap.t ;
     graph : (Rdf_graph.graph * Rdf_xml.global_state) option ;
+    dataset : Rdf_ds.dataset option ;
+    final_graph : Rdf_graph.graph option ;
   }
 
 let data_empty =
@@ -67,6 +69,8 @@ let data_empty =
     namespaces = None ;
     loaded_graphs = IMap.empty ;
     graph = None ;
+    dataset = None ;
+    final_graph = None ;
   }
 ;;
 
@@ -313,32 +317,30 @@ let graph (stog, data) =
       let data = set_graph data (g, gstate) in
       ((stog, data), (g, gstate))
 ;;
-let final_graph = ref None;;
 
-let dataset = ref None;;
-let set_dataset x = dataset := Some x;;
-let dataset stog =
-  match !dataset with
-    Some d -> d
+let set_dataset data x = { data with dataset = Some x };;
+let dataset (stog, data) =
+  match data.dataset with
+    Some d -> ((stog, data), d)
   | None ->
       let g =
-        match !final_graph with
+        match data.final_graph with
           None -> failwith "No final graph!"
         | Some g -> g
       in
       let loaded =
         IMap.fold
           (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
-          !loaded_graphs []
+          data.loaded_graphs []
       in
       let named =
-        Str_map.fold
+        Stog_types.Hid_map.fold
           (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
-          !graph_by_elt loaded
+          data.graph_by_elt loaded
       in
       let d = Rdf_ds.simple_dataset ~named g in
-      set_dataset d;
-      d
+      let data = set_dataset data d in
+      ((stog, data), d)
 ;;
 
 let tag_of_string s =
@@ -352,26 +354,27 @@ let tag_of_string s =
   with Not_found -> ("",s)
 
 
-let get_rdf_resource stog env atts =
+let get_rdf_resource (stog,data) env atts =
   try
-    Some (List.assoc ("","obj") atts)
+    ((stog, data), Some (List.assoc ("","obj") atts))
   with
     Not_found ->
       try
         let href = List.assoc ("", "href") atts in
-        match Stog_plug.elt_by_href stog env href with
+        let ((stog, data), e) = Stog_plug.elt_by_href stog (stog, data) env href in
+        match e with
           None -> raise Not_found
         | Some (elt, hid, idopt) ->
             let url =
-              let url = Stog_html.elt_url stog elt in
+              let url = Stog_engine.elt_url stog elt in
               match idopt with
                 None -> url
               | Some s -> Neturl.modify_url ~fragment: s url
             in
-            Some (Stog_types.string_of_url url)
+            ((stog, data), Some (Stog_types.string_of_url url))
       with
         Not_found ->
-          None
+          ((stog, data), None)
 ;;
 
 let rec map_to_rdf_xml_tree = function
