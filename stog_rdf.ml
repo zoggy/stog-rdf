@@ -736,7 +736,7 @@ let make_engine ?levels () =
     type cache_data = string
 
     let cache_load stog data elt xml =
-      let (g,_) = create_graph ~elt (stog,data) in
+      let (g,_) = create_graph ~elt (stog, { data with namespaces = Some [] }) in
       let base = Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_engine.elt_url stog elt)) in
       Rdf_xml.from_string g ~base xml ;
       add_elt_graph data elt g
