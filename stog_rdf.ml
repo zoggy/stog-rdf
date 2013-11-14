@@ -104,7 +104,6 @@ let namespaces data =
   | None -> assert false
 ;;
 
-
 let add_loaded_graph data name g =
   { data with loaded_graphs = IMap.add name g data.loaded_graphs }
 ;;
@@ -692,8 +691,7 @@ let fun_rdf_select elt_id (stog,data) env args subs =
 ;;
 
 let rules_rdf_select stog elt_id =
-  (*let rules = Stog_html.build_base_rules stog elt_id elt in*)
-  [ ("", "rdf-select"), fun_rdf_select elt_id ]
+  [("", "rdf-select"), fun_rdf_select elt_id]
 ;;
 
 let rules_rdf_load stog elt_id =
