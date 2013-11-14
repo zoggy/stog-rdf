@@ -36,9 +36,9 @@ let dbg = Stog_misc.create_log_fun
   ~prefix: "Rdf_sparql_eval"
     "STOG_RDF_DEBUG_LEVEL"
 ;;
-let plugin_name = "rdf";;
+let module_name = "rdf";;
 
-let rc_file stog = Stog_plug.plugin_config_file stog plugin_name;;
+let rc_file stog = Stog_plug.plugin_config_file stog module_name;;
 
 let keep_pcdata =
   let rec iter b = function
@@ -62,7 +62,7 @@ type rdf_data =
     final_graph : Rdf_graph.graph option ;
   }
 
-let data_empty =
+let empty_data =
   {
     out_file = "graph.rdf" ;
     graph_by_elt = Stog_types.Hid_map.empty ;
@@ -181,7 +181,8 @@ let load_graph acc_data ?elt name ?data options =
   acc_data
 ;;
 
-let rule_load_graph rule_tag elt (stog, acc_data) env args xmls =
+let rule_load_graph rule_tag elt_id (stog, acc_data) env args xmls =
+  let elt = Stog_types.elt stog elt_id in
   let name =
      match Xtmpl.get_arg args ("", "name") with
        None -> failwith (rule_tag^": missing name attribute")
@@ -398,7 +399,7 @@ let prerr_atts l =
   l
 ;;
 
-let parse_prop stog env g subject atts gstate subs =
+let parse_prop (stog,data) env g subject atts gstate subs =
   let subject =
     try Rdf_iri.iri (List.assoc ("","subject") atts)
     with Not_found -> subject
@@ -409,7 +410,7 @@ let parse_prop stog env g subject atts gstate subs =
         failwith "Missing \"pred\" attribute for rdf node"
   in
   let tag = tag_of_string pred in
-  let rdf_resource = get_rdf_resource stog env atts in
+  let ((stog,data), rdf_resource) = get_rdf_resource (stog,data) env atts in
   let atts = List.filter
     (function
          (("", "subject"), _) | (("","pred"),_) | (("","href"),_) | (("","obj"),_) -> false
@@ -438,12 +439,12 @@ let parse_prop stog env g subject atts gstate subs =
       (Xtmpl.string_of_xml (map_to_xml_tree node))));
 
   let (gstate, _) = Rdf_xml.input_prop g state (gstate, 0) node in
-  gstate
+  ((stog, data), gstate)
 ;;
 
 let gather =
-  let rec iter stog env elt_url subj_id g gstate = function
-    Xtmpl.D _ -> gstate
+  let rec iter env elt_url subj_id g ((stog,data), gstate) = function
+    Xtmpl.D _ -> ((stog, data), gstate)
   | Xtmpl.E (("","rdf"), atts, subs) ->
       let subject =
         let uri =
@@ -453,29 +454,29 @@ let gather =
         in
         Rdf_iri.of_uri (Rdf_uri.of_neturl uri)
       in
-      parse_prop stog env g subject atts gstate subs
+      parse_prop (stog,data) env g subject atts gstate subs
   | Xtmpl.E (_, atts, subs) ->
       let subj_id =
          try Some (List.assoc ("", "id") atts)
          with Not_found -> subj_id
       in
-      iter_list stog env elt_url subj_id g gstate subs
-  and iter_list stog env elt_url subj_id g gstate l =
-    List.fold_left (iter stog env elt_url subj_id g) gstate l
+      iter_list env elt_url subj_id g ((stog,data), gstate) subs
+  and iter_list env elt_url subj_id g ((stog,data), gstate) l =
+    List.fold_left (iter env elt_url subj_id g) ((stog,data),gstate) l
   in
-  fun stog env g elt gstate xmls ->
-    let elt_url = Stog_html.elt_url stog elt in
-    iter_list stog env elt_url None g gstate xmls
+  fun (stog,data) env g elt gstate xmls ->
+    let elt_url = Stog_engine.elt_url stog elt in
+    iter_list env elt_url None g ((stog, data), gstate) xmls
 ;;
 
-let create_graph ?elt stog =
+let create_graph ?elt (stog,data) =
   let base_url =
     match elt with
       None -> stog.Stog_types.stog_base_url
-    | Some elt -> Stog_html.elt_url stog elt
+    | Some elt -> Stog_engine.elt_url stog elt
   in
   let g = Rdf_graph.open_graph (Rdf_iri.of_uri (Rdf_uri.of_neturl base_url)) in
-  let namespaces = namespaces () in
+  let namespaces = namespaces data in
   let gstate = {
       Rdf_xml.blanks = Rdf_xml.SMap.empty ;
       gnamespaces = build_ns_map namespaces ;
@@ -484,49 +485,56 @@ let create_graph ?elt stog =
   (g, gstate)
 ;;
 
-let add_elt_graph elt g =
-  graph_by_elt := Str_map.add
-    (Stog_types.string_of_human_id elt.elt_human_id) g
-    !graph_by_elt
+let add_elt_graph data elt g =
+  { data with
+    graph_by_elt = Stog_types.Hid_map.add
+      elt.elt_human_id g data.graph_by_elt ;
+  }
 ;;
 
-let make_graph env stog elt_id elt =
-  let (g, gstate) = create_graph ~elt stog in
-  let xmls =
-    match elt.Stog_types.elt_out with
-      None -> elt.Stog_types.elt_body
-    | Some x -> x
-  in
-  try
-    let env =
-      Xtmpl.env_of_list ~env
-        [("", Stog_tags.elt_hid),
-          (fun  _ _ _ -> [Xtmpl.D (Stog_types.string_of_human_id elt.elt_human_id)])
-        ]
+let make_graph =
+  let make env (stog, data) elt_id =
+    let elt = Stog_types.elt stog elt_id in
+    let (g, gstate) = create_graph ~elt (stog,data) in
+    let xmls =
+      match elt.Stog_types.elt_out with
+        None -> elt.Stog_types.elt_body
+      | Some x -> x
     in
-    ignore(gather stog env g elt gstate xmls);
-    add_elt_graph elt g;
-    elt
-  with
-    e ->
-  (*
-      let s = Xtmpl.string_of_xmls xmls in
-      prerr_endline s;
-  *)
-      raise e
+    try
+      let env =
+        Xtmpl.env_of_list ~env
+          [("", Stog_tags.elt_hid),
+            (fun  acc _ _ _ -> (acc, [Xtmpl.D (Stog_types.string_of_human_id elt.elt_human_id)]))
+          ]
+      in
+      let ((stog, data), _) = gather (stog, data) env g elt gstate xmls in
+      let data = add_elt_graph data elt g in
+      let stog = Stog_types.set_elt stog elt_id elt in
+      (stog, data)
+    with
+      e ->
+        (*
+           let s = Xtmpl.string_of_xmls xmls in
+           prerr_endline s;
+           *)
+        raise e
+  in
+  fun env acc elt_ids -> List.fold_left (make env) acc elt_ids
 ;;
 
-let output_graph _ stog _ =
-  let (g, _) = create_graph stog in
-  let namespaces = namespaces () in
-  Str_map.iter (fun _ g_elt -> Rdf_graph.merge g g_elt) !graph_by_elt;
-  let out_file = Filename.concat stog.Stog_types.stog_outdir !out_file in
+let output_graph _ (stog,data) _ =
+  let (g, _) = create_graph (stog,data) in
+  let namespaces = namespaces data in
+  Stog_types.Hid_map.iter
+    (fun _ g_elt -> Rdf_graph.merge g g_elt) data.graph_by_elt;
+  let out_file = Filename.concat stog.Stog_types.stog_outdir data.out_file in
   Rdf_xml.to_file ~namespaces g out_file;
   Stog_plug.verbose (Printf.sprintf "RDF graph dumped into %S" out_file);
   let dot = Rdf_dot.dot_of_graph ~namespaces g in
   Stog_misc.file_of_string ~file: ((Filename.chop_extension out_file)^".dot") dot;
-  final_graph := Some g;
-  [], []
+  let data = { data with final_graph = Some g } in
+  (stog, data)
 ;;
 
 let rdf_string_of_term = Rdf_term.string_of_term ;;
@@ -585,27 +593,28 @@ let apply_select_sols env stog elt query sols =
 ;;
 
 let rec read_select_query_from_atts stog elt query = function
-  [] -> query
+  [] -> (stog, query)
 | arg :: q ->
-    let query =
+    let (stog, query) =
       match arg with
       | (("", "sep"), s) ->
-          { query with separator = [Xtmpl.D s]}
+          (stog, { query with separator = [Xtmpl.D s]})
       | (("", "query"), s) ->
-          { query with query = s }
+          (stog, { query with query = s })
       | (("", "tmpl"), file) ->
-          let tmpl = Stog_tmpl.read_template_file stog elt file in
-          { query with tmpl = [tmpl] }
+          let (stog, tmpl) = Stog_tmpl.read_template_file stog elt file in
+          (stog, { query with tmpl = [tmpl] })
       | ((prefix, att), s) ->
-          { query with
-            args = ((prefix, att), s) :: query.args ;
-          }
+          (stog,
+           { query with
+             args = ((prefix, att), s) :: query.args ;
+           })
     in
     read_select_query_from_atts stog elt query q
 ;;
 
 let rec read_select_query_from_xmls stog elt query = function
-  [] -> query
+  [] -> (stog, query)
 | (Xtmpl.D _) :: q -> read_select_query_from_xmls stog elt query q
 | (Xtmpl.E (tag,_,xmls)) :: q ->
     (*prerr_endline ("tag=("^(fst tag)^","^(snd tag)^")");*)
@@ -624,7 +633,7 @@ let rec read_select_query_from_xmls stog elt query = function
 
 let build_select_query stog elt env args subs =
   let q = { query = "" ; tmpl = [] ; separator = [] ; args = [] } in
-  let q = read_select_query_from_atts stog elt q args in
+  let (stog, q) = read_select_query_from_atts stog elt q args in
   let q = { q with args = List.rev q.args } in
   let with_xmls = List.exists
     (function Xtmpl.E _ -> true | _ -> false)
@@ -632,13 +641,13 @@ let build_select_query stog elt env args subs =
   in
   match with_xmls, subs with
     true, _ -> read_select_query_from_xmls stog elt q subs
-  | false, [] -> q
-  | false, _ -> { q with query = keep_pcdata subs }
+  | false, [] -> (stog, q)
+  | false, _ -> (stog, { q with query = keep_pcdata subs })
 ;;
 
-let exec_select stog elt env query =
+let exec_select (stog,data) elt env query =
   try
-    let dataset = dataset () in
+    let ((stog,data), dataset) = dataset (stog, data) in
     (*Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";*)
     let q = Rdf_sparql.query_from_string query.query in
     (*prerr_endline ("query: "^query.query);*)
@@ -650,7 +659,7 @@ let exec_select stog elt env query =
       Rdf_sparql.Solutions sols ->
         Stog_msg.verbose ~level: 2
           (Printf.sprintf "%d solutions for query %s" (List.length sols) query.query);
-        apply_select_sols env stog elt query sols
+        ((stog,data), apply_select_sols env stog elt query sols)
     | _ ->
         failwith "rdf-select did not return solutions"
   with
@@ -662,8 +671,9 @@ let exec_select stog elt env query =
       failwith ("rdf-select:\n"^query.query^"\n"^msg)
 ;;
 
-let fun_rdf_select stog elt_id elt env args subs =
-  let query = build_select_query stog elt env args subs in
+let fun_rdf_select elt_id (stog,data) env args subs =
+  let elt = Stog_types.elt stog elt_id in
+  let (stog, query) = build_select_query stog elt env args subs in
   if query.tmpl = [] then
       failwith "Missing or empty template for rdf-select";
   let query =
@@ -674,49 +684,84 @@ let fun_rdf_select stog elt_id elt env args subs =
         let s = List.fold_right
           (fun (iri, s) acc ->
              "PREFIX "^s^": <"^(Rdf_iri.string iri)^">\n"^acc)
-          (namespaces ()) s
+            (namespaces data) s
         in
         { query with query = s }
   in
-  exec_select stog elt env query
+  exec_select (stog,data) elt env query
 ;;
 
-let rules_rdf_select stog elt_id elt =
-  let rules = Stog_html.build_base_rules stog elt_id elt in
-  (("", "rdf-select"), fun_rdf_select stog elt_id elt) :: rules
+let rules_rdf_select stog elt_id =
+  (*let rules = Stog_html.build_base_rules stog elt_id elt in*)
+  [ ("", "rdf-select"), fun_rdf_select elt_id ]
 ;;
 
-let rules_rdf_load stog elt_id elt =
-  [ ("", "rdf"), (fun _ _ _ -> []) ;
-    ("", "rdf-load"), (rule_load_graph "rdf-load" stog elt) ;
+let rules_rdf_load stog elt_id =
+  [ ("", "rdf"), (fun acc _ _ _ -> (acc, [])) ;
+    ("", "rdf-load"), (rule_load_graph "rdf-load" elt_id) ;
   ];;
 
-let () = Stog_plug.register_level_fun 200 make_graph;;
-let () = Stog_plug.register_level_fun_on_elt_list 201 output_graph;;
-let () = Stog_plug.register_level_fun 202 (Stog_html.compute_elt rules_rdf_load);;
-let () = Stog_plug.register_level_fun 220 (Stog_html.compute_elt rules_rdf_select);;
 
+let level_funs =
+  [
+    "init", fun_level_init ;
+    "make-graph", Stog_engine.Fun_stog_data make_graph ;
+    "output-graph", Stog_engine.Fun_stog_data output_graph ;
+    "load", Stog_engine.fun_apply_stog_data_elt_rules rules_rdf_load ;
+    "select", Stog_engine.fun_apply_stog_data_elt_rules rules_rdf_select ;
+  ]
+;;
 
-module Cache =
+let default_levels =
+  List.fold_left
+    (fun map (name, levels) -> Stog_types.Str_map.add name levels map)
+    Stog_types.Str_map.empty
+    [
+      "init", [ -1 ] ;
+      "make-graph", [ 200 ] ;
+      "output-graph", [ 201 ] ;
+      "load", [ 202 ] ;
+      "select", [ 220 ] ;
+    ]
+
+let make_engine ?levels () =
+  let levels = Stog_html.mk_levels module_name level_funs default_levels ?levels () in
+  let module M =
   struct
-    type t = string
-    let name = plugin_name
-    let load elt xml =
-      let stog = Stog_plug.stog () in
-      let (g,_) = create_graph ~elt stog in
-      let base = Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_html.elt_url stog elt)) in
+    type data = rdf_data
+    let modul = {
+        Stog_engine.mod_name = module_name ;
+        mod_levels = levels ;
+        mod_data = empty_data ;
+       }
+
+    type cache_data = string
+
+    let cache_load stog data elt xml =
+      let (g,_) = create_graph ~elt (stog,data) in
+      let base = Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_engine.elt_url stog elt)) in
       Rdf_xml.from_string g ~base xml ;
-      add_elt_graph elt g
+      add_elt_graph data elt g
 
-    let store elt =
-      let stog = Stog_plug.stog () in
+    let cache_store stog data elt =
       let g =
-        try Str_map.find (Stog_types.string_of_human_id elt.elt_human_id) !graph_by_elt
-        with Not_found ->
-            fst (create_graph ~elt stog)
+        try Stog_types.Hid_map.find elt.elt_human_id data.graph_by_elt
+        with Not_found -> fst (create_graph ~elt (stog,data))
       in
-      let namespaces = namespaces () in
+      let namespaces = namespaces data in
       Rdf_xml.to_string ~namespaces g
-  end;;
+  end
+  in
+  (module M : Stog_engine.Module)
+;;
 
-let () = Stog_plug.register_cache (module Cache);;
+let f stog =
+  let levels =
+    try Some (Stog_types.Str_map.find module_name stog.Stog_types.stog_levels)
+    with Not_found -> None
+  in
+  make_engine ?levels ()
+;;
+
+let () = Stog_engine.register_module module_name f;
+
