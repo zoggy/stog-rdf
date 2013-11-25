@@ -188,13 +188,13 @@ let rule_load_graph rule_tag elt_id (stog, acc_data) env args xmls =
      | Some s -> rdf_iri s
   in
   let options =
-    List.fold_left
-      (fun acc (op,v) ->
+    Xtmpl.Name_map.fold
+      (fun op v acc ->
          match op with
            ("","name") -> acc
          | ("",s) -> (s, keep_pcdata v) :: acc
          | _ -> acc)
-      [] args
+      args []
   in
   let data = match xmls with [] -> None | _ -> Some (keep_pcdata xmls) in
   let acc_data = load_graph acc_data ~elt name ?data options in
@@ -360,8 +360,8 @@ let get_rdf_resource (stog,data) env atts =
   with
     Not_found ->
       try
-        let href = 
-          match Xtmpl.get_arg_cdata atts ("", "href") with 
+        let href =
+          match Xtmpl.get_arg_cdata atts ("", "href") with
             None -> raise Not_found
           | Some s -> s
         in
@@ -417,17 +417,15 @@ let parse_prop (stog,data) env g subject atts gstate subs =
   in
   let tag = tag_of_string pred in
   let ((stog,data), rdf_resource) = get_rdf_resource (stog,data) env atts in
-  let atts = List.filter
-    (function
-         (("", "subject"), _) | (("","pred"),_) | (("","href"),_) | (("","obj"),_) -> false
-     | _ -> true
-    ) atts
+  let atts = List.fold_left
+    (fun atts name -> Xtmpl.Name_map.remove ("", name) atts)
+      atts ["subject" ; "pred" ; "href" ; "obj"]
   in
   let atts =
     match rdf_resource with
       None -> atts
     | Some uri ->
-        (("", Rdf_iri.string Rdf_rdf.rdf_resource), [Xtmpl.D uri]) :: atts
+        Xtmpl.one_att ~atts ("", Rdf_iri.string Rdf_rdf.rdf_resource) [Xtmpl.D uri]
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_term.Iri subject) ;
@@ -463,7 +461,7 @@ let gather =
       in
       parse_prop (stog,data) env g subject atts gstate subs
   | Xtmpl.E (_, atts, subs) ->
-      let subj_id = 
+      let subj_id =
         match Xtmpl.get_arg_cdata atts ("", "id") with
           None -> subj_id
         | Some s -> Some s
@@ -567,7 +565,7 @@ type query_spec =
   { query : string ;
     tmpl : Xtmpl.tree list ;
     separator : Xtmpl.tree list ;
-    args : Xtmpl.attribute list ;
+    args : Xtmpl.attributes ;
   }
 
 let apply_select_sol env stog elt tmpl sol =
@@ -575,12 +573,13 @@ let apply_select_sol env stog elt tmpl sol =
   let atts =
     Rdf_sparql.solution_fold
       (fun name term acc ->
-         (("", name), esc string_of_term term) ::
-         (("", name^"_rdf"), esc rdf_string_of_term term) ::
-         acc
+         Xtmpl.atts_of_list ~atts: acc
+           [ ("", name), esc string_of_term term ;
+             ("", name^"_rdf"), esc rdf_string_of_term term ;
+           ]
       )
       sol
-      []
+      Xtmpl.empty_atts
   in
   [Xtmpl.E (("",Xtmpl.tag_env), atts, tmpl)]
 ;;
@@ -595,30 +594,30 @@ let apply_select_sols env stog elt query sols =
      | _ -> iter (query.separator @ xml @ acc) q
   in
   let xmls = iter [] sols in
-  match query.args with
-    [] -> xmls
+  match Xtmpl.Name_map.is_empty query.args with
+    true -> xmls
   | _ -> [Xtmpl.E (("", Xtmpl.tag_env), query.args, xmls)]
 ;;
 
-let rec read_select_query_from_atts stog elt query = function
-  [] -> (stog, query)
-| arg :: q ->
-    let (stog, query) =
-      match arg with
-      | (("", "sep"), sep) ->
-          (stog, { query with separator = sep })
-      | (("", "query"), s) ->
-          (stog, { query with query = Xtmpl.string_of_xmls s })
-      | (("", "tmpl"), file) ->
-          let (stog, tmpl) = Stog_tmpl.read_template_file stog elt (Xtmpl.string_of_xmls file) in
-          (stog, { query with tmpl = [tmpl] })
-      | ((prefix, att), v) ->
-          (stog,
-           { query with
-             args = ((prefix, att), v) :: query.args ;
-           })
-    in
-    read_select_query_from_atts stog elt query q
+let read_select_query_from_atts stog elt query args =
+  let f name v (stog, query) =
+    match name with
+    | ("", "sep") ->
+        (stog, { query with separator = v })
+    | ("", "query") ->
+        (stog, { query with query = Xtmpl.string_of_xmls v })
+    | ("", "tmpl") ->
+        let (stog, tmpl) =
+          Stog_tmpl.read_template_file stog elt (Xtmpl.string_of_xmls v)
+        in
+        (stog, { query with tmpl = [tmpl] })
+    | (prefix, att) ->
+        (stog,
+         { query with
+           args = Xtmpl.one_att ~atts: query.args (prefix, att) v ;
+         })
+  in
+  Xtmpl.Name_map.fold f args (stog, query)
 ;;
 
 let rec read_select_query_from_xmls stog elt query = function
@@ -633,16 +632,15 @@ let rec read_select_query_from_xmls stog elt query = function
       | ("", "query") -> { query with query = keep_pcdata xmls }
       | (prefix, tag) ->
           { query with
-            args = ((prefix, tag), xmls) :: query.args ;
+            args = Xtmpl.one_att ~atts: query.args (prefix, tag) xmls ;
           }
     in
     read_select_query_from_xmls stog elt query q
 ;;
 
 let build_select_query stog elt env args subs =
-  let q = { query = "" ; tmpl = [] ; separator = [] ; args = [] } in
+  let q = { query = "" ; tmpl = [] ; separator = [] ; args = Xtmpl.empty_atts } in
   let (stog, q) = read_select_query_from_atts stog elt q args in
-  let q = { q with args = List.rev q.args } in
   let with_xmls = List.exists
     (function Xtmpl.E _ -> true | _ -> false)
     subs
