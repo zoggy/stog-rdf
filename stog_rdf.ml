@@ -425,7 +425,7 @@ let parse_prop (stog,data) env g subject atts gstate subs =
     match rdf_resource with
       None -> atts
     | Some uri ->
-        Xtmpl.one_att ~atts ("", Rdf_iri.string Rdf_rdf.rdf_resource) [Xtmpl.D uri]
+        Xtmpl.atts_one ~atts ("", Rdf_iri.string Rdf_rdf.rdf_resource) [Xtmpl.D uri]
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_term.Iri subject) ;
@@ -579,7 +579,7 @@ let apply_select_sol env stog elt tmpl sol =
            ]
       )
       sol
-      Xtmpl.empty_atts
+      Xtmpl.atts_empty
   in
   [Xtmpl.E (("",Xtmpl.tag_env), atts, tmpl)]
 ;;
@@ -614,7 +614,7 @@ let read_select_query_from_atts stog elt query args =
     | (prefix, att) ->
         (stog,
          { query with
-           args = Xtmpl.one_att ~atts: query.args (prefix, att) v ;
+           args = Xtmpl.atts_one ~atts: query.args (prefix, att) v ;
          })
   in
   Xtmpl.Name_map.fold f args (stog, query)
@@ -632,14 +632,14 @@ let rec read_select_query_from_xmls stog elt query = function
       | ("", "query") -> { query with query = keep_pcdata xmls }
       | (prefix, tag) ->
           { query with
-            args = Xtmpl.one_att ~atts: query.args (prefix, tag) xmls ;
+            args = Xtmpl.atts_one ~atts: query.args (prefix, tag) xmls ;
           }
     in
     read_select_query_from_xmls stog elt query q
 ;;
 
 let build_select_query stog elt env args subs =
-  let q = { query = "" ; tmpl = [] ; separator = [] ; args = Xtmpl.empty_atts } in
+  let q = { query = "" ; tmpl = [] ; separator = [] ; args = Xtmpl.atts_empty } in
   let (stog, q) = read_select_query_from_atts stog elt q args in
   let with_xmls = List.exists
     (function Xtmpl.E _ -> true | _ -> false)
