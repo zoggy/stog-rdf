@@ -1,4 +1,4 @@
-Next release:
+Release 0.10.0:
 - base html rules are not applied, they must be
   explictely run after level 220 to apply on result
   of rdf-select (using the "levels" field in stog
