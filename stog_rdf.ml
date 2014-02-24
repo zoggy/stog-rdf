@@ -33,7 +33,7 @@
 open Stog_types;;
 
 let dbg = Stog_misc.create_log_fun
-  ~prefix: "Rdf_sparql_eval"
+  ~prefix: "Stog-rdf"
     "STOG_RDF_DEBUG_LEVEL"
 ;;
 let module_name = "rdf";;
@@ -355,16 +355,16 @@ let tag_of_string s =
 
 
 let get_rdf_resource (stog,data) env atts =
-  try
-    ((stog, data), Xtmpl.get_arg_cdata atts ("","obj"))
-  with
-    Not_found ->
+  match Xtmpl.get_arg_cdata atts ("","obj") with
+    (Some _) as x -> ((stog, data), x)
+  | None ->
       try
         let href =
           match Xtmpl.get_arg_cdata atts ("", "href") with
             None -> raise Not_found
           | Some s -> s
         in
+        dbg ~level: 3 (fun () -> "get_rdf_resource href="^href);
         let ((stog, data), e) = Stog_plug.elt_by_href stog (stog, data) env href in
         match e with
           None -> raise Not_found
@@ -378,7 +378,20 @@ let get_rdf_resource (stog,data) env atts =
             ((stog, data), Some (Stog_types.string_of_url url))
       with
         Not_found ->
+          dbg ~level: 3 (fun () -> "href not found");
           ((stog, data), None)
+;;
+
+let merge_cdata =
+  let rec f acc = function
+    [] -> List.rev acc
+  | (Xtmpl.D s1) :: (Xtmpl.D s2) :: q -> f acc ((Xtmpl.D (s1^s2)) :: q)
+  | ((Xtmpl.D _) as x) :: q -> f (x :: acc) q
+  | (Xtmpl.E (t, atts, subs)) :: q ->
+      let subs = f [] subs in
+      f ((Xtmpl.E (t, atts, subs)) :: acc) q
+  in
+  f []
 ;;
 
 let rec map_to_rdf_xml_tree = function
@@ -416,10 +429,13 @@ let parse_prop (stog,data) env g subject atts gstate subs =
     | Some s -> s
   in
   let tag = tag_of_string pred in
+  dbg ~level: 3 (fun () -> Printf.sprintf "parse_prop subject=%s, pred=%s"
+     (Rdf_iri.string subject) pred);
   let ((stog,data), rdf_resource) = get_rdf_resource (stog,data) env atts in
   let atts = List.fold_left
     (fun atts name -> Xtmpl.Name_map.remove ("", name) atts)
-      atts ["subject" ; "pred" ; "href" ; "obj"]
+      atts ["subject" ; "pred" ; "href" ; "obj" ;
+        Xtmpl.att_defer ; Xtmpl.att_protect ; Xtmpl.att_escamp ]
   in
   let atts =
     match rdf_resource with
@@ -436,7 +452,7 @@ let parse_prop (stog,data) env g subject atts gstate subs =
       namespaces = gstate.Rdf_xml.gnamespaces ; (*IMap.empty ;*)
     }
   in
-  let subs = List.map map_to_rdf_xml_tree subs in
+  let subs = List.map map_to_rdf_xml_tree (merge_cdata subs) in
   let atts = Xtmpl.string_of_xml_atts atts in
   let node = Rdf_xml.E ((tag, atts), subs) in
   let node = apply_namespaces gstate.Rdf_xml.gnamespaces node in
