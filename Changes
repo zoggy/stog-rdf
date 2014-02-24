@@ -1,3 +1,8 @@
+Next release:
+- more debug messages (level 3),
+- merge cdata before looking for rdf resource,
+- filter xtmpl default attributes (defer_, protect_, escamp_)
+
 Release 0.10.0:
 - base html rules are not applied, they must be
   explictely run after level 220 to apply on result
