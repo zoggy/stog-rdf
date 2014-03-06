@@ -54,7 +54,7 @@ module IMap = Rdf_iri.Irimap;;
 type rdf_data =
   {
     out_file : string ;
-    graph_by_elt : Rdf_graph.graph Stog_types.Hid_map.t;
+    graph_by_elt : Rdf_graph.graph Stog_types.Path_map.t;
     namespaces : (Rdf_iri.iri * string) list option ;
     loaded_graphs : Rdf_graph.graph IMap.t ;
     graph : (Rdf_graph.graph * Rdf_xml.global_state) option ;
@@ -65,7 +65,7 @@ type rdf_data =
 let empty_data =
   {
     out_file = "graph.rdf" ;
-    graph_by_elt = Stog_types.Hid_map.empty ;
+    graph_by_elt = Stog_types.Path_map.empty ;
     namespaces = None ;
     loaded_graphs = IMap.empty ;
     graph = None ;
@@ -334,7 +334,7 @@ let dataset (stog, data) =
           data.loaded_graphs []
       in
       let named =
-        Stog_types.Hid_map.fold
+        Stog_types.Path_map.fold
           (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
           data.graph_by_elt loaded
       in
@@ -368,7 +368,7 @@ let get_rdf_resource (stog,data) env atts =
         let ((stog, data), e) = Stog_plug.elt_by_href stog (stog, data) env href in
         match e with
           None -> raise Not_found
-        | Some (elt, hid, idopt) ->
+        | Some (elt, path, idopt) ->
             let url =
               let url = Stog_engine.elt_url stog elt in
               match idopt with
@@ -509,8 +509,8 @@ let create_graph ?elt (stog,data) =
 
 let add_elt_graph data elt g =
   { data with
-    graph_by_elt = Stog_types.Hid_map.add
-      elt.elt_human_id g data.graph_by_elt ;
+    graph_by_elt = Stog_types.Path_map.add
+      elt.elt_path g data.graph_by_elt ;
   }
 ;;
 
@@ -526,8 +526,8 @@ let make_graph =
     try
       let env =
         Xtmpl.env_of_list ~env
-          [("", Stog_tags.elt_hid),
-            (fun  acc _ _ _ -> (acc, [Xtmpl.D (Stog_types.string_of_human_id elt.elt_human_id)]))
+          [("", Stog_tags.elt_path),
+            (fun  acc _ _ _ -> (acc, [Xtmpl.D (Stog_types.string_of_path elt.elt_path)]))
           ]
       in
       let ((stog, data), _) = gather (stog, data) env g elt gstate xmls in
@@ -548,7 +548,7 @@ let make_graph =
 let output_graph _ (stog,data) _ =
   let (g, _) = create_graph (stog,data) in
   let namespaces = namespaces data in
-  Stog_types.Hid_map.iter
+  Stog_types.Path_map.iter
     (fun _ g_elt -> Rdf_graph.merge g g_elt) data.graph_by_elt;
   let out_file = Filename.concat stog.Stog_types.stog_outdir data.out_file in
   Rdf_xml.to_file ~namespaces g out_file;
@@ -766,7 +766,7 @@ let make_engine ?levels () =
 
     let cache_store stog data elt =
       let g =
-        try Stog_types.Hid_map.find elt.elt_human_id data.graph_by_elt
+        try Stog_types.Path_map.find elt.elt_path data.graph_by_elt
         with Not_found -> fst (create_graph ~elt (stog,data))
       in
       let namespaces = namespaces data in
