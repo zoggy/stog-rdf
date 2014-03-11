@@ -1,5 +1,6 @@
 Next release:
-- upgrade to next release of stog (paths instead of hids)
+- upgrade to next release of stog (paths instead of hids
+  documents instead of elements)
 - more debug messages (level 3),
 - merge cdata before looking for rdf resource,
 - filter xtmpl default attributes (defer_, protect_, escamp_)
