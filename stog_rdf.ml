@@ -54,7 +54,7 @@ module IMap = Rdf_iri.Irimap;;
 type rdf_data =
   {
     out_file : string ;
-    graph_by_doc : Rdf_graph.graph Stog_types.Path_map.t;
+    graph_by_doc : Rdf_graph.graph Stog_path.Map.t;
     namespaces : (Rdf_iri.iri * string) list option ;
     loaded_graphs : Rdf_graph.graph IMap.t ;
     graph : (Rdf_graph.graph * Rdf_xml.global_state) option ;
@@ -65,7 +65,7 @@ type rdf_data =
 let empty_data =
   {
     out_file = "graph.rdf" ;
-    graph_by_doc = Stog_types.Path_map.empty ;
+    graph_by_doc = Stog_path.Map.empty ;
     namespaces = None ;
     loaded_graphs = IMap.empty ;
     graph = None ;
@@ -334,7 +334,7 @@ let dataset (stog, data) =
           data.loaded_graphs []
       in
       let named =
-        Stog_types.Path_map.fold
+        Stog_path.Map.fold
           (fun _ g acc -> (g.Rdf_graph.name (), g) :: acc)
           data.graph_by_doc loaded
       in
@@ -509,13 +509,13 @@ let create_graph ?doc (stog,data) =
 
 let add_doc_graph data doc g =
   { data with
-    graph_by_doc = Stog_types.Path_map.add
+    graph_by_doc = Stog_path.Map.add
       doc.doc_path g data.graph_by_doc ;
   }
 ;;
 
 let make_graph =
-  let make env (stog, data) doc_id =
+  let make env doc_id (stog, data) =
     let doc = Stog_types.doc stog doc_id in
     let (g, gstate) = create_graph ~doc (stog,data) in
     let xmls =
@@ -527,7 +527,7 @@ let make_graph =
       let env =
         Xtmpl.env_of_list ~env
           [("", Stog_tags.doc_path),
-            (fun  acc _ _ _ -> (acc, [Xtmpl.D (Stog_types.string_of_path doc.doc_path)]))
+            (fun  acc _ _ _ -> (acc, [Xtmpl.D (Stog_path.to_string doc.doc_path)]))
           ]
       in
       let ((stog, data), _) = gather (stog, data) env g doc gstate xmls in
@@ -542,13 +542,13 @@ let make_graph =
            *)
         raise e
   in
-  fun env acc doc_ids -> List.fold_left (make env) acc doc_ids
+  fun env acc doc_ids -> Stog_types.Doc_set.fold (make env) doc_ids acc 
 ;;
 
 let output_graph _ (stog,data) _ =
   let (g, _) = create_graph (stog,data) in
   let namespaces = namespaces data in
-  Stog_types.Path_map.iter
+  Stog_path.Map.iter
     (fun _ g_doc -> Rdf_graph.merge g g_doc) data.graph_by_doc;
   let out_file = Filename.concat stog.Stog_types.stog_outdir data.out_file in
   Rdf_xml.to_file ~namespaces g out_file;
@@ -766,7 +766,7 @@ let make_engine ?levels () =
 
     let cache_store stog data doc =
       let g =
-        try Stog_types.Path_map.find doc.doc_path data.graph_by_doc
+        try Stog_path.Map.find doc.doc_path data.graph_by_doc
         with Not_found -> fst (create_graph ~doc (stog,data))
       in
       let namespaces = namespaces data in
