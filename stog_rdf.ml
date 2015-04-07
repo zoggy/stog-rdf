@@ -183,7 +183,7 @@ let load_graph acc_data ?doc name ?data options =
 let rule_load_graph rule_tag doc_id (stog, acc_data) env args xmls =
   let doc = Stog_types.doc stog doc_id in
   let name =
-     match Xtmpl.get_arg_cdata args ("", "name") with
+     match Xtmpl.get_att_cdata args ("", "name") with
        None -> failwith (rule_tag^": missing name attribute")
      | Some s -> rdf_iri s
   in
@@ -226,7 +226,9 @@ let read_options (stog,data) =
 
   let ns = List.fold_left
     (fun acc (iri, name) -> (rdf_iri iri, name) :: acc)
-    [ Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url), "site" ;
+    [ Rdf_iri.of_uri
+        (Rdf_uri.of_neturl (Stog_url.to_neturl (stog.Stog_types.stog_base_url))),
+        "site" ;
       Rdf_rdf.rdf_ "", "rdf" ;
     ]
     ns#get
@@ -306,7 +308,8 @@ let graph (stog, data) =
     Some x -> ((stog,data), x)
   | None ->
       let g = Rdf_graph.open_graph
-        (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url))
+        (Rdf_iri.of_uri
+         (Rdf_uri.of_neturl (Stog_url.to_neturl stog.Stog_types.stog_base_url)))
       in
       let namespaces = namespaces data in
       let gstate = {
@@ -355,12 +358,12 @@ let tag_of_string s =
 
 
 let get_rdf_resource (stog,data) env atts =
-  match Xtmpl.get_arg_cdata atts ("","obj") with
+  match Xtmpl.get_att_cdata atts ("","obj") with
     (Some _) as x -> ((stog, data), x)
   | None ->
       try
         let href =
-          match Xtmpl.get_arg_cdata atts ("", "href") with
+          match Xtmpl.get_att_cdata atts ("", "href") with
             None -> raise Not_found
           | Some s -> s
         in
@@ -373,9 +376,9 @@ let get_rdf_resource (stog,data) env atts =
               let url = Stog_engine.doc_url stog doc in
               match idopt with
                 None -> url
-              | Some s -> Neturl.modify_url ~fragment: s url
+              | Some s -> Stog_url.with_fragment url s
             in
-            ((stog, data), Some (Stog_types.string_of_url url))
+            ((stog, data), Some (Stog_url.to_string url))
       with
         Not_found ->
           dbg ~level: 3 (fun () -> "href not found");
@@ -419,12 +422,12 @@ let prerr_atts l =
 
 let parse_prop (stog,data) env g subject atts gstate subs =
   let subject =
-    match Xtmpl.get_arg_cdata atts ("","subject") with
+    match Xtmpl.get_att_cdata atts ("","subject") with
         None -> subject
       | Some iri -> Rdf_iri.iri iri
   in
   let pred =
-    match Xtmpl.get_arg_cdata atts ("","pred") with
+    match Xtmpl.get_att_cdata atts ("","pred") with
       None -> failwith "Missing \"pred\" attribute for rdf node"
     | Some s -> s
   in
@@ -446,7 +449,8 @@ let parse_prop (stog,data) env g subject atts gstate subs =
   let state = {
       Rdf_xml.subject = Some (Rdf_term.Iri subject) ;
       predicate = None ;
-      xml_base = Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url) ;
+      xml_base = Rdf_iri.of_uri
+        (Rdf_uri.of_neturl (Stog_url.to_neturl stog.Stog_types.stog_base_url)) ;
       xml_lang = None ;
       datatype = None ;
       namespaces = gstate.Rdf_xml.gnamespaces ; (*IMap.empty ;*)
@@ -471,14 +475,14 @@ let gather =
         let uri =
           match subj_id with
             None -> doc_url
-          | Some id -> Neturl.modify_url ~fragment: id doc_url
+          | Some id -> Stog_url.with_fragment doc_url id
         in
-        Rdf_iri.of_uri (Rdf_uri.of_neturl uri)
+        Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_url.to_neturl uri))
       in
       parse_prop (stog,data) env g subject atts gstate subs
   | Xtmpl.E (_, atts, subs) ->
       let subj_id =
-        match Xtmpl.get_arg_cdata atts ("", "id") with
+        match Xtmpl.get_att_cdata atts ("", "id") with
           None -> subj_id
         | Some s -> Some s
       in
@@ -497,7 +501,9 @@ let create_graph ?doc (stog,data) =
       None -> stog.Stog_types.stog_base_url
     | Some doc -> Stog_engine.doc_url stog doc
   in
-  let g = Rdf_graph.open_graph (Rdf_iri.of_uri (Rdf_uri.of_neturl base_url)) in
+  let g = Rdf_graph.open_graph
+    (Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_url.to_neturl base_url)))
+  in
   let namespaces = namespaces data in
   let gstate = {
       Rdf_xml.blanks = Rdf_xml.SMap.empty ;
@@ -542,7 +548,7 @@ let make_graph =
            *)
         raise e
   in
-  fun env acc doc_ids -> Stog_types.Doc_set.fold (make env) doc_ids acc 
+  fun env acc doc_ids -> Stog_types.Doc_set.fold (make env) doc_ids acc
 ;;
 
 let output_graph _ (stog,data) _ =
@@ -672,10 +678,13 @@ let exec_select (stog,data) doc env query =
     let ((stog,data), dataset) = dataset (stog, data) in
     (*Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";*)
     let q = Rdf_sparql.query_from_string query.query in
+    let base =
+      Rdf_iri.of_uri (Rdf_uri.of_neturl
+       (Stog_url.to_neturl stog.Stog_types.stog_base_url))
+    in
     (*prerr_endline ("query: "^query.query);*)
     let res = Rdf_sparql.execute
-      ~base: (Rdf_iri.of_uri (Rdf_uri.of_neturl stog.Stog_types.stog_base_url))
-      dataset q
+      ~base dataset q
     in
     match res with
       Rdf_sparql.Solutions sols ->
@@ -760,7 +769,10 @@ let make_engine ?levels () =
 
     let cache_load stog data doc xml =
       let (g,_) = create_graph ~doc (stog, { data with namespaces = Some [] }) in
-      let base = Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_engine.doc_url stog doc)) in
+      let base =
+        Rdf_iri.of_uri (Rdf_uri.of_neturl
+         (Stog_url.to_neturl (Stog_engine.doc_url stog doc)))
+      in
       Rdf_xml.from_string g ~base xml ;
       add_doc_graph data doc g
 
