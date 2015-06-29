@@ -201,44 +201,56 @@ let rule_load_graph rule_tag doc_id (stog, acc_data) env args xmls =
   ((stog, acc_data), [])
 ;;
 
+module W = Ocf.Wrapper
+
 let read_options (stog,data) =
-  let module CF = Config_file in
-  let group = new CF.group in
-  let ns = new CF.list_cp
-    (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers) ~group
-    ["namespaces"] [] "pairs (uri, name) specifying namespaces"
+  let group = Ocf.group in
+  let ns = Ocf.list
+    ~doc: "pairs (uri, name) specifying namespaces"
+    (W.pair W.string W.string)
+    []
   in
-  let graph_file = new CF.string_cp ~group ["graph_file"] data.out_file
-    "name of main graph output file"
+  let group = Ocf.add group ["namespaces"] ns in
+  
+  let graph_file = Ocf.string 
+    ~doc: "name of main graph output file"
+      data.out_file 
   in
-  let sources = new CF.list_cp
-    (CF.tuple2_wrappers CF.string_wrappers
-     (CF.list_wrappers (CF.tuple2_wrappers CF.string_wrappers CF.string_wrappers)))
-      ~group
-      ["sources"] []
-      "pairs (uri, options) specifying graphs to load and associate to uris. Options is a list of pair (name, value). To load a load, use [\"file\", \"myfile.ttl\"]. Other options can be given to access graphs from a database (see OCaml-RDF's Rdf_graph documentation)"
+  let group = Ocf.add group ["graph-file"] graph_file in
+
+  let sources = Ocf.list
+    (W.pair W.string (W.list (W.pair W.string W.string)))
+    ~doc: "pairs (uri, options) specifying graphs to load and associate to uris. Options is a list of pair (name, value). To load a file, use [\"file\", \"myfile.ttl\"]. Other options can be given to access graphs from a database (see OCaml-RDF's Rdf_graph documentation)"
+    []
   in
+  let group = Ocf.add group ["sources"] sources in
+  
   let rc_file = rc_file stog in
-  group#read rc_file;
-  group#write rc_file;
+  
+  if not (Sys.file_exists rc_file) then
+    Ocf.to_file group rc_file;
 
-  let data = { data with out_file = graph_file#get } in
+  try
+    Ocf.from_file group rc_file;
 
-  let ns = List.fold_left
-    (fun acc (iri, name) -> (rdf_iri iri, name) :: acc)
-    [ Rdf_iri.of_uri
-        (Rdf_uri.of_neturl (Stog_url.to_neturl (stog.Stog_types.stog_base_url))),
-        "site" ;
-      Rdf_rdf.rdf_ "", "rdf" ;
-    ]
-    ns#get
-  in
-  let data = { data with namespaces = Some ns } in
-  let data = List.fold_left
-    (fun data (iri, options) -> load_graph data (rdf_iri iri) options)
-      data sources#get
-  in
-  (stog, data)
+    let data = { data with out_file = Ocf.get graph_file } in
+    let ns = List.fold_left
+      (fun acc (iri, name) -> (rdf_iri iri, name) :: acc)
+        [ Rdf_iri.of_uri
+          (Rdf_uri.of_neturl (Stog_url.to_neturl (stog.Stog_types.stog_base_url))),
+          "site" ;
+          Rdf_rdf.rdf_ "", "rdf" ;
+        ]
+        (Ocf.get ns)
+    in
+    let data = { data with namespaces = Some ns } in
+    let data = List.fold_left
+      (fun data (iri, options) -> load_graph data (rdf_iri iri) options)
+        data (Ocf.get sources)
+    in
+    (stog, data)
+  with 
+    Ocf.Error e -> failwith (Ocf.string_of_error e)
 ;;
 
 let init env (stog,data) _ = read_options (stog,data);;

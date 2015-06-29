@@ -1,4 +1,5 @@
 Next release:
+- Use Ocf 0.3.0 instead of config-file (following stog)
 - Upgrade to Xtmpl >= 0.11
 - Upgrade to Stog 0.15
 
