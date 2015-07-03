@@ -1,0 +1,9 @@
+{
+  "sources":
+    "pairs (uri, options) specifying graphs to load and associate to uris. Options is a list of pair (name, value). To load a file, use [\"file\", \"myfile.ttl\"]. Other options can be given to access graphs from a database (see OCaml-RDF's Rdf_graph documentation)",
+  "sources": [],
+  "namespaces": "pairs (uri, name) specifying namespaces",
+  "namespaces": [ ("http://toto.net/", "toto") ],
+  "graph_file": "name of main graph output file",
+  "graph_file": "graph.rdf"
+}
