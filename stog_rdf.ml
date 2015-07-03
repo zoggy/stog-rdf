@@ -211,12 +211,12 @@ let read_options (stog,data) =
     []
   in
   let group = Ocf.add group ["namespaces"] ns in
-  
-  let graph_file = Ocf.string 
+
+  let graph_file = Ocf.string
     ~doc: "name of main graph output file"
-      data.out_file 
+      data.out_file
   in
-  let group = Ocf.add group ["graph-file"] graph_file in
+  let group = Ocf.add group ["graph_file"] graph_file in
 
   let sources = Ocf.list
     (W.pair W.string (W.list (W.pair W.string W.string)))
@@ -224,9 +224,9 @@ let read_options (stog,data) =
     []
   in
   let group = Ocf.add group ["sources"] sources in
-  
+
   let rc_file = rc_file stog in
-  
+
   if not (Sys.file_exists rc_file) then
     Ocf.to_file group rc_file;
 
@@ -249,7 +249,7 @@ let read_options (stog,data) =
         data (Ocf.get sources)
     in
     (stog, data)
-  with 
+  with
     Ocf.Error e -> failwith (Ocf.string_of_error e)
 ;;
 
