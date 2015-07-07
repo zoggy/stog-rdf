@@ -1,7 +1,7 @@
-Next release:
+Release 0.15.0:
 - Use Ocf 0.3.0 instead of config-file (following stog)
 - Upgrade to Xtmpl >= 0.11
-- Upgrade to Stog 0.15
+- Upgrade to Stog 0.15.0
 
 Release 0.11.0:
 - upgrade to stog 0.11.0 (paths instead of hids
