@@ -31,6 +31,8 @@
 *)
 
 open Stog_types;;
+module XR = Xtmpl_rewrite
+module Xml = Xtmpl_xml
 
 let dbg = Stog_misc.create_log_fun
   ~prefix: "Stog-rdf"
@@ -43,7 +45,7 @@ let rc_file stog = Stog_plug.plugin_config_file stog module_name;;
 let keep_pcdata =
   let rec iter b = function
     [] -> Buffer.contents b
-  | (Xtmpl.D s) :: q -> Buffer.add_string b s; iter b q
+  | (XR.D s) :: q -> Buffer.add_string b s.Xml.text; iter b q
   | _ :: q -> iter b q
   in
   fun xmls -> iter (Buffer.create 256) xmls
@@ -180,15 +182,16 @@ let load_graph acc_data ?doc name ?data options =
   acc_data
 ;;
 
-let rule_load_graph rule_tag doc_id (stog, acc_data) env args xmls =
+let rule_load_graph rule_tag doc_id (stog, acc_data) env ?loc args xmls =
   let doc = Stog_types.doc stog doc_id in
   let name =
-     match Xtmpl.get_att_cdata args ("", "name") with
-       None -> failwith (rule_tag^": missing name attribute")
+     match XR.get_att_cdata args ("", "name") with
+       None -> 
+        failwith (Xml.loc_sprintf loc "%s: missing name attribute" rule_tag)
      | Some s -> rdf_iri s
   in
   let options =
-    Xtmpl.Name_map.fold
+    Xml.Name_map.fold
       (fun op v acc ->
          match op with
            ("","name") -> acc
@@ -370,12 +373,12 @@ let tag_of_string s =
 
 
 let get_rdf_resource (stog,data) env atts =
-  match Xtmpl.get_att_cdata atts ("","obj") with
+  match XR.get_att_cdata atts ("","obj") with
     (Some _) as x -> ((stog, data), x)
   | None ->
       try
         let href =
-          match Xtmpl.get_att_cdata atts ("", "href") with
+          match XR.get_att_cdata atts ("", "href") with
             None -> raise Not_found
           | Some s -> s
         in
@@ -400,29 +403,41 @@ let get_rdf_resource (stog,data) env atts =
 let merge_cdata =
   let rec f acc = function
     [] -> List.rev acc
-  | (Xtmpl.D s1) :: (Xtmpl.D s2) :: q -> f acc ((Xtmpl.D (s1^s2)) :: q)
-  | ((Xtmpl.D _) as x) :: q -> f (x :: acc) q
-  | (Xtmpl.E (t, atts, subs)) :: q ->
-      let subs = f [] subs in
-      f ((Xtmpl.E (t, atts, subs)) :: acc) q
+  | (XR.D { Xml.text = s1}) :: (XR.D {Xml.text = s2}) :: q -> 
+      f acc ((XR.cdata (s1^s2)) :: q)
+  | ((XR.D _) | (XR.C _ ) | (XR.PI _) as x) :: q -> f (x :: acc) q
+  | (XR.E node) :: q ->
+      let subs = f [] node.XR.subs in
+      f ((XR.E { node with XR.subs }) :: acc) q
   in
   f []
 ;;
 
+(* FIXME: simplify this when Rdf will use Xtmpl Xml representation *)
+
+let atts_to_string atts =
+  Xml.Name_map.fold
+    (fun name (s,_) acc -> (name, s)::acc)
+    (XR.atts_to_string atts) []
+
 let rec map_to_rdf_xml_tree = function
-  Xtmpl.D s -> Rdf_xml.D s
-| Xtmpl.E (t, atts, subs) ->
+  XR.D s -> Rdf_xml.D s.Xml.text
+| XR.C _ | XR.PI _ -> Rdf_xml.D ""
+| XR.E { XR.name ; atts ; subs } ->
     let subs = List.map map_to_rdf_xml_tree subs in
-    let atts = Xtmpl.string_of_xml_atts atts in
-    Rdf_xml.E ((t, atts), subs)
+    let atts = atts_to_string atts in
+    Rdf_xml.E ((name, atts), subs)
 ;;
 
 let rec map_to_xml_tree = function
-  Rdf_xml.D s -> Xtmpl.D s
+  Rdf_xml.D s -> XR.cdata s
 | Rdf_xml.E ((t, atts), subs) ->
     let subs = List.map map_to_xml_tree subs in
-    let atts = Xtmpl.xmls_of_atts atts in
-    Xtmpl.E (t, atts, subs)
+    let atts = XR.from_xml_atts
+      (List.fold_left (fun acc (name, v) -> Xml.Name_map.add name (v,None) acc)
+        Xml.atts_empty atts)
+    in
+    XR.node t ~atts subs
 ;;
 
 let prerr_atts l =
@@ -432,15 +447,16 @@ let prerr_atts l =
   l
 ;;
 
-let parse_prop (stog,data) env g subject atts gstate subs =
+let parse_prop (stog,data) env g subject atts gstate ?loc subs =
   let subject =
-    match Xtmpl.get_att_cdata atts ("","subject") with
+    match XR.get_att_cdata atts ("","subject") with
         None -> subject
       | Some iri -> Rdf_iri.iri iri
   in
   let pred =
-    match Xtmpl.get_att_cdata atts ("","pred") with
-      None -> failwith "Missing \"pred\" attribute for rdf node"
+    match XR.get_att_cdata atts ("","pred") with
+      None -> 
+        failwith (Xml.loc_sprintf loc "Missing \"pred\" attribute for rdf node")
     | Some s -> s
   in
   let tag = tag_of_string pred in
@@ -448,15 +464,15 @@ let parse_prop (stog,data) env g subject atts gstate subs =
      (Rdf_iri.string subject) pred);
   let ((stog,data), rdf_resource) = get_rdf_resource (stog,data) env atts in
   let atts = List.fold_left
-    (fun atts name -> Xtmpl.Name_map.remove ("", name) atts)
+    (fun atts name -> Xml.Name_map.remove ("", name) atts)
       atts ["subject" ; "pred" ; "href" ; "obj" ;
-        Xtmpl.att_defer ; Xtmpl.att_protect ; Xtmpl.att_escamp ]
+        XR.att_defer ; XR.att_protect ; XR.att_escamp ]
   in
   let atts =
     match rdf_resource with
       None -> atts
     | Some uri ->
-        Xtmpl.atts_one ~atts ("", Rdf_iri.string Rdf_rdf.rdf_resource) [Xtmpl.D uri]
+        XR.atts_one ~atts ("", Rdf_iri.string Rdf_rdf.rdf_resource) [XR.cdata uri]
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_term.Iri subject) ;
@@ -469,11 +485,11 @@ let parse_prop (stog,data) env g subject atts gstate subs =
     }
   in
   let subs = List.map map_to_rdf_xml_tree (merge_cdata subs) in
-  let atts = Xtmpl.string_of_xml_atts atts in
+  let atts = atts_to_string atts in
   let node = Rdf_xml.E ((tag, atts), subs) in
   let node = apply_namespaces gstate.Rdf_xml.gnamespaces node in
   dbg ~level: 2 (fun () -> (Printf.sprintf "rdf node:\n%s"
-      (Xtmpl.string_of_xml (map_to_xml_tree node))));
+      (XR.to_string [map_to_xml_tree node])));
 
   let (gstate, _) = Rdf_xml.input_prop g state (gstate, 0) node in
   ((stog, data), gstate)
@@ -481,8 +497,8 @@ let parse_prop (stog,data) env g subject atts gstate subs =
 
 let gather =
   let rec iter env doc_url subj_id g ((stog,data), gstate) = function
-    Xtmpl.D _ -> ((stog, data), gstate)
-  | Xtmpl.E (("","rdf"), atts, subs) ->
+    XR.D _ | XR.C _ | XR.PI _ -> ((stog, data), gstate)
+  | XR.E { XR.name = ("","rdf") ; atts ; subs ; loc} ->
       let subject =
         let uri =
           match subj_id with
@@ -491,10 +507,10 @@ let gather =
         in
         Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_url.to_neturl uri))
       in
-      parse_prop (stog,data) env g subject atts gstate subs
-  | Xtmpl.E (_, atts, subs) ->
+      parse_prop (stog,data) env g subject atts gstate ?loc subs
+  | XR.E { XR.atts ; subs } ->
       let subj_id =
-        match Xtmpl.get_att_cdata atts ("", "id") with
+        match XR.get_att_cdata atts ("", "id") with
           None -> subj_id
         | Some s -> Some s
       in
@@ -543,9 +559,9 @@ let make_graph =
     in
     try
       let env =
-        Xtmpl.env_of_list ~env
+        XR.env_of_list ~env
           [("", Stog_tags.doc_path),
-            (fun  acc _ _ _ -> (acc, [Xtmpl.D (Stog_path.to_string doc.doc_path)]))
+            (fun  acc _ ?loc _ _ -> (acc, [XR.cdata (Stog_path.to_string doc.doc_path)]))
           ]
       in
       let ((stog, data), _) = gather (stog, data) env g doc gstate xmls in
@@ -555,7 +571,7 @@ let make_graph =
     with
       e ->
         (*
-           let s = Xtmpl.string_of_xmls xmls in
+           let s = XR.string_of_xmls xmls in
            prerr_endline s;
            *)
         raise e
@@ -597,25 +613,25 @@ let string_of_term t =
 
 type query_spec =
   { query : string ;
-    tmpl : Xtmpl.tree list ;
-    separator : Xtmpl.tree list ;
-    args : Xtmpl.attributes ;
+    tmpl : XR.tree list ;
+    separator : XR.tree list ;
+    args : XR.attributes ;
   }
 
 let apply_select_sol env stog doc tmpl sol =
-  let esc f s = [ Xtmpl.D (f s) ] in
+  let esc f s = [ XR.cdata (f s) ] in
   let atts =
     Rdf_sparql.solution_fold
       (fun name term acc ->
-         Xtmpl.atts_of_list ~atts: acc
+         XR.atts_of_list ~atts: acc
            [ ("", name), esc string_of_term term ;
              ("", name^"_rdf"), esc rdf_string_of_term term ;
            ]
       )
       sol
-      Xtmpl.atts_empty
+      XR.atts_empty
   in
-  [Xtmpl.E (("",Xtmpl.tag_env), atts, tmpl)]
+  [XR.node ("",XR.tag_env) ~atts tmpl]
 ;;
 
 let apply_select_sols env stog doc query sols =
@@ -628,55 +644,57 @@ let apply_select_sols env stog doc query sols =
      | _ -> iter (query.separator @ xml @ acc) q
   in
   let xmls = iter [] sols in
-  match Xtmpl.Name_map.is_empty query.args with
+  match Xml.Name_map.is_empty query.args with
     true -> xmls
-  | _ -> [Xtmpl.E (("", Xtmpl.tag_env), query.args, xmls)]
+  | _ -> [XR.node ("", XR.tag_env) ~atts: query.args xmls]
 ;;
 
-let read_select_query_from_atts stog doc query args =
+let read_select_query_from_atts stog doc ?loc query args =
   let f name v (stog, query) =
     match name with
     | ("", "sep") ->
         (stog, { query with separator = v })
     | ("", "query") ->
-        (stog, { query with query = Xtmpl.string_of_xmls v })
+        (stog, { query with query = XR.to_string v })
     | ("", "tmpl") ->
         let (stog, tmpl) =
-          Stog_tmpl.read_template_file stog doc (Xtmpl.string_of_xmls v)
+          Stog_tmpl.read_template_file stog doc ?loc (XR.to_string v)
         in
-        (stog, { query with tmpl = [tmpl] })
+        (stog, { query with tmpl = tmpl })
     | (prefix, att) ->
         (stog,
          { query with
-           args = Xtmpl.atts_one ~atts: query.args (prefix, att) v ;
+           args = XR.atts_one ~atts: query.args (prefix, att) v ;
          })
   in
-  Xtmpl.Name_map.fold f args (stog, query)
+  Xml.Name_map.fold f args (stog, query)
 ;;
 
 let rec read_select_query_from_xmls stog doc query = function
   [] -> (stog, query)
-| (Xtmpl.D _) :: q -> read_select_query_from_xmls stog doc query q
-| (Xtmpl.E (tag,_,xmls)) :: q ->
-    (*prerr_endline ("tag=("^(fst tag)^","^(snd tag)^")");*)
+| (XR.D _) :: q
+| (XR.C _) :: q
+| (XR.PI _ ) :: q -> read_select_query_from_xmls stog doc query q
+| (XR.E { XR.name ; subs  ; loc}) :: q ->
+    (*prerr_endline ("name=("^(fst tag)^","^(snd tag)^")");*)
     let query =
-      match tag with
-        ("", "tmpl") -> { query with tmpl = xmls }
-      | ("", "sep") -> { query with separator = xmls}
-      | ("", "query") -> { query with query = keep_pcdata xmls }
+      match name with
+        ("", "tmpl") -> { query with tmpl = subs }
+      | ("", "sep") -> { query with separator = subs}
+      | ("", "query") -> { query with query = keep_pcdata subs }
       | (prefix, tag) ->
           { query with
-            args = Xtmpl.atts_one ~atts: query.args (prefix, tag) xmls ;
+            args = XR.atts_one ~atts: query.args (prefix, tag) subs ;
           }
     in
     read_select_query_from_xmls stog doc query q
 ;;
 
-let build_select_query stog doc env args subs =
-  let q = { query = "" ; tmpl = [] ; separator = [] ; args = Xtmpl.atts_empty } in
-  let (stog, q) = read_select_query_from_atts stog doc q args in
+let build_select_query stog doc env ?loc args subs =
+  let q = { query = "" ; tmpl = [] ; separator = [] ; args = XR.atts_empty } in
+  let (stog, q) = read_select_query_from_atts stog doc ?loc q args in
   let with_xmls = List.exists
-    (function Xtmpl.E _ -> true | _ -> false)
+    (function XR.E _ -> true | _ -> false)
     subs
   in
   match with_xmls, subs with
@@ -714,14 +732,14 @@ let exec_select (stog,data) doc env query =
       failwith ("rdf-select:\n"^query.query^"\n"^msg)
 ;;
 
-let fun_rdf_select doc_id (stog,data) env args subs =
+let fun_rdf_select doc_id (stog,data) env ?loc args subs =
   let doc = Stog_types.doc stog doc_id in
   let (stog, query) = build_select_query stog doc env args subs in
   if query.tmpl = [] then
-      failwith "Missing or empty template for rdf-select";
+      failwith (Xml.loc_sprintf loc "Missing or empty template for rdf-select");
   let query =
     match query.query with
-      "" -> failwith "No query for rdf-select";
+      "" -> failwith (Xml.loc_sprintf loc "No query for rdf-select")
     | s ->
         (* add default namespaces as header *)
         let s = List.fold_right
@@ -739,7 +757,7 @@ let rules_rdf_select stog doc_id =
 ;;
 
 let rules_rdf_load stog doc_id =
-  [ ("", "rdf"), (fun acc _ _ _ -> (acc, [])) ;
+  [ ("", "rdf"), (fun acc _ ?loc _ _ -> (acc, [])) ;
     ("", "rdf-load"), (rule_load_graph "rdf-load" doc_id) ;
   ];;
 
