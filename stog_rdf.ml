@@ -51,13 +51,13 @@ let keep_pcdata =
   fun xmls -> iter (Buffer.create 256) xmls
 ;;
 
-module IMap = Rdf_iri.Irimap;;
+module IMap = Iri.Map;;
 
 type rdf_data =
   {
     out_file : string ;
     graph_by_doc : Rdf_graph.graph Stog_path.Map.t;
-    namespaces : (Rdf_iri.iri * string) list option ;
+    namespaces : (Iri.t * string) list option ;
     loaded_graphs : Rdf_graph.graph IMap.t ;
     graph : (Rdf_graph.graph * Rdf_xml.global_state) option ;
     dataset : Rdf_ds.dataset option ;
@@ -78,21 +78,21 @@ let empty_data =
 
 type source =
   | Src_file of string
-  | Src_iri of Rdf_iri.iri
+  | Src_iri of Iri.t
   | Src_str of string
 ;;
 
 let string_of_source = function
   Src_file f -> "file " ^ f
-| Src_iri i -> "iri " ^ (Rdf_iri.string i)
+| Src_iri i -> "iri " ^ (Iri.to_string i)
 | Src_str _ -> "<inline code>"
 ;;
 
 let rdf_iri s =
-  try Rdf_iri.iri s
+  try Iri.of_string s
   with
-  | Rdf_iri.Invalid_iri (s, msg) ->
-      failwith ("Invalid IRI "^s^" ("^msg^")")
+  | Iri.Error e ->
+      failwith ("Invalid IRI "^s^" ("^(Iri.string_of_error e)^")")
   | e ->
       let msg = Printf.sprintf "While making uri from %S: %s" s
         (Printexc.to_string e)
@@ -112,11 +112,11 @@ let add_loaded_graph data name g =
 
 let get_loaded_graph data name =
   try IMap.find name data.loaded_graphs
-  with _ -> failwith ("Graph "^(Rdf_iri.string name)^" not loaded.")
+  with _ -> failwith ("Graph "^(Iri.to_string name)^" not loaded.")
 ;;
 
 let load_graph acc_data ?doc name ?data options =
-  Stog_plug.verbose ("Load graph "^(Rdf_iri.string name)^"...");
+  Stog_plug.verbose ("Load graph "^(Iri.to_string name)^"...");
   Stog_plug.verbose ~level:2
     ("Options:"^
      (String.concat ", "
@@ -140,7 +140,7 @@ let load_graph acc_data ?doc name ?data options =
                     let ttl =
                       List.fold_right
                         (fun (iri, s) acc ->
-                           "@prefix "^s^": <"^(Rdf_iri.string iri)^"> .\n"^acc)
+                           "@prefix "^s^": <"^(Iri.to_string iri)^"> .\n"^acc)
                         (namespaces acc_data) s
                     in
                     Rdf_ttl.from_string g ttl;
@@ -186,7 +186,7 @@ let rule_load_graph rule_tag doc_id (stog, acc_data) env ?loc args xmls =
   let doc = Stog_types.doc stog doc_id in
   let name =
      match XR.get_att_cdata args ("", "name") with
-       None -> 
+       None ->
         failwith (Xml.loc_sprintf loc "%s: missing name attribute" rule_tag)
      | Some s -> rdf_iri s
   in
@@ -239,8 +239,7 @@ let read_options (stog,data) =
     let data = { data with out_file = Ocf.get graph_file } in
     let ns = List.fold_left
       (fun acc (iri, name) -> (rdf_iri iri, name) :: acc)
-        [ Rdf_iri.of_uri
-          (Rdf_uri.of_neturl (Stog_url.to_neturl (stog.Stog_types.stog_base_url))),
+        [ rdf_iri (Stog_url.to_string stog.Stog_types.stog_base_url),
           "site" ;
           Rdf_rdf.rdf_ "", "rdf" ;
         ]
@@ -261,13 +260,13 @@ let fun_level_init = Stog_engine.Fun_stog_data init;;
 
 let build_ns_map namespaces =
   let pred iri name iri2 name2 =
-    name = name2 && not (Rdf_iri.equal iri iri2)
+    name = name2 && not (Iri.equal iri iri2)
   in
   let f map (iri, name) =
     try
       let name2 = IMap.find iri map in
       let msg = Printf.sprintf "%S is already associated to name %S"
-        (Rdf_iri.string iri) name2
+        (Iri.to_string iri) name2
       in
       failwith msg
     with
@@ -276,7 +275,7 @@ let build_ns_map namespaces =
           (
            let msg = Printf.sprintf
              "Namespace %S already associated to an IRI different from %S"
-             name (Rdf_iri.string iri)
+             name (Iri.to_string iri)
            in
            failwith msg
           )
@@ -295,7 +294,7 @@ let apply_namespaces =
       dbg ~level: 2 (fun () -> "map_qn pref="^pref^", s="^s);
       try
         let p = Rdf_xml.SMap.find pref ns in
-        (Rdf_iri.string p, s)
+        (Iri.to_string p, s)
       with Not_found ->
           dbg ~level: 2 (fun () -> "not found");
           (pref, s)
@@ -323,8 +322,7 @@ let graph (stog, data) =
     Some x -> ((stog,data), x)
   | None ->
       let g = Rdf_graph.open_graph
-        (Rdf_iri.of_uri
-         (Rdf_uri.of_neturl (Stog_url.to_neturl stog.Stog_types.stog_base_url)))
+        (Iri.of_string (Stog_url.to_string stog.Stog_types.stog_base_url))
       in
       let namespaces = namespaces data in
       let gstate = {
@@ -403,7 +401,7 @@ let get_rdf_resource (stog,data) env atts =
 let merge_cdata =
   let rec f acc = function
     [] -> List.rev acc
-  | (XR.D { Xml.text = s1}) :: (XR.D {Xml.text = s2}) :: q -> 
+  | (XR.D { Xml.text = s1}) :: (XR.D {Xml.text = s2}) :: q ->
       f acc ((XR.cdata (s1^s2)) :: q)
   | ((XR.D _) | (XR.C _ ) | (XR.PI _) as x) :: q -> f (x :: acc) q
   | (XR.E node) :: q ->
@@ -451,17 +449,17 @@ let parse_prop (stog,data) env g subject atts gstate ?loc subs =
   let subject =
     match XR.get_att_cdata atts ("","subject") with
         None -> subject
-      | Some iri -> Rdf_iri.iri iri
+      | Some iri -> rdf_iri iri
   in
   let pred =
     match XR.get_att_cdata atts ("","pred") with
-      None -> 
+      None ->
         failwith (Xml.loc_sprintf loc "Missing \"pred\" attribute for rdf node")
     | Some s -> s
   in
   let tag = tag_of_string pred in
   dbg ~level: 3 (fun () -> Printf.sprintf "parse_prop subject=%s, pred=%s"
-     (Rdf_iri.string subject) pred);
+     (Iri.to_string subject) pred);
   let ((stog,data), rdf_resource) = get_rdf_resource (stog,data) env atts in
   let atts = List.fold_left
     (fun atts name -> Xml.Name_map.remove ("", name) atts)
@@ -472,13 +470,12 @@ let parse_prop (stog,data) env g subject atts gstate ?loc subs =
     match rdf_resource with
       None -> atts
     | Some uri ->
-        XR.atts_one ~atts ("", Rdf_iri.string Rdf_rdf.rdf_resource) [XR.cdata uri]
+        XR.atts_one ~atts ("", Iri.to_string Rdf_rdf.resource) [XR.cdata uri]
   in
   let state = {
       Rdf_xml.subject = Some (Rdf_term.Iri subject) ;
       predicate = None ;
-      xml_base = Rdf_iri.of_uri
-        (Rdf_uri.of_neturl (Stog_url.to_neturl stog.Stog_types.stog_base_url)) ;
+      xml_base = Iri.of_string (Stog_url.to_string stog.Stog_types.stog_base_url) ;
       xml_lang = None ;
       datatype = None ;
       namespaces = gstate.Rdf_xml.gnamespaces ; (*IMap.empty ;*)
@@ -505,7 +502,7 @@ let gather =
             None -> doc_url
           | Some id -> Stog_url.with_fragment doc_url id
         in
-        Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_url.to_neturl uri))
+        Iri.of_string (Stog_url.to_string uri)
       in
       parse_prop (stog,data) env g subject atts gstate ?loc subs
   | XR.E { XR.atts ; subs } ->
@@ -530,7 +527,7 @@ let create_graph ?doc (stog,data) =
     | Some doc -> Stog_engine.doc_url stog doc
   in
   let g = Rdf_graph.open_graph
-    (Rdf_iri.of_uri (Rdf_uri.of_neturl (Stog_url.to_neturl base_url)))
+    (Iri.of_string (Stog_url.to_string base_url))
   in
   let namespaces = namespaces data in
   let gstate = {
@@ -599,14 +596,14 @@ let string_of_term t =
   match Rdf_dt.of_term t with
   | Rdf_dt.Err e -> Rdf_dt.string_of_error e
   | Rdf_dt.Blank s -> "_:"^s
-  | Rdf_dt.Iri iri -> Rdf_iri.string iri
+  | Rdf_dt.Iri iri -> Iri.to_string iri
   | Rdf_dt.String s -> s
   | Rdf_dt.Int n -> string_of_int n
   |	Rdf_dt.Float f -> string_of_float f
   | Rdf_dt.Bool true -> "true"
   | Rdf_dt.Bool false -> "false"
-  |	Rdf_dt.Datetime netdate ->
-      Netdate.format ~fmt: Rdf_dt.date_fmt netdate
+  |	Rdf_dt.Datetime dt ->
+      CalendarLib.Printer.Fcalendar.sprint Rdf_dt.date_fmt dt
   | Rdf_dt.Ltrl (s,_) -> s
   | Rdf_dt.Ltrdt (s, _) -> s
 ;;
@@ -709,8 +706,7 @@ let exec_select (stog,data) doc env query =
     (*Rdf_ttl.to_file dataset.Rdf_ds.default "/tmp/rdfselect.ttl";*)
     let q = Rdf_sparql.query_from_string query.query in
     let base =
-      Rdf_iri.of_uri (Rdf_uri.of_neturl
-       (Stog_url.to_neturl stog.Stog_types.stog_base_url))
+      Iri.of_string (Stog_url.to_string stog.Stog_types.stog_base_url)
     in
     (*prerr_endline ("query: "^query.query);*)
     let res = Rdf_sparql.execute
@@ -744,7 +740,7 @@ let fun_rdf_select doc_id (stog,data) env ?loc args subs =
         (* add default namespaces as header *)
         let s = List.fold_right
           (fun (iri, s) acc ->
-             "PREFIX "^s^": <"^(Rdf_iri.string iri)^">\n"^acc)
+             "PREFIX "^s^": <"^(Iri.to_string iri)^">\n"^acc)
             (namespaces data) s
         in
         { query with query = s }
@@ -800,8 +796,7 @@ let make_engine ?levels () =
     let cache_load stog data doc xml =
       let (g,_) = create_graph ~doc (stog, { data with namespaces = Some [] }) in
       let base =
-        Rdf_iri.of_uri (Rdf_uri.of_neturl
-         (Stog_url.to_neturl (Stog_engine.doc_url stog doc)))
+        Iri.of_string (Stog_url.to_string (Stog_engine.doc_url stog doc))
       in
       Rdf_xml.from_string g ~base xml ;
       add_doc_graph data doc g
