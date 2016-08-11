@@ -389,7 +389,7 @@ let get_rdf_resource (stog,data) env atts =
               let url = Stog_engine.doc_url stog doc in
               match idopt with
                 None -> url
-              | Some s -> Stog_url.with_fragment url s
+              | Some s -> Stog_url.with_fragment url (Some s)
             in
             ((stog, data), Some (Stog_url.to_string url))
       with
@@ -500,7 +500,7 @@ let gather =
         let uri =
           match subj_id with
             None -> doc_url
-          | Some id -> Stog_url.with_fragment doc_url id
+          | Some id -> Stog_url.with_fragment doc_url (Some id)
         in
         Iri.of_string (Stog_url.to_string uri)
       in
