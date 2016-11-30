@@ -38,7 +38,7 @@ OCAMLDOC=ocamldoc
 OCAMLLEX=ocamllex
 OCAMLFIND=ocamlfind
 
-PACKAGES=netstring,stog,rdf,ocf
+PACKAGES=stog,rdf,ocf
 
 INCLUDES=-I +ocamldoc
 COMPFLAGS=$(INCLUDES) -g -annot -package $(PACKAGES) -rectypes
