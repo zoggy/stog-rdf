@@ -598,12 +598,12 @@ let string_of_term t =
   | Rdf_dt.Blank s -> "_:"^s
   | Rdf_dt.Iri iri -> Iri.to_string iri
   | Rdf_dt.String s -> s
-  | Rdf_dt.Int n -> string_of_int n
+  | Rdf_dt.Int (n, _) -> string_of_int n
   |	Rdf_dt.Float f -> string_of_float f
   | Rdf_dt.Bool true -> "true"
   | Rdf_dt.Bool false -> "false"
-  |	Rdf_dt.Datetime dt ->
-      CalendarLib.Printer.Fcalendar.sprint Rdf_dt.date_fmt dt
+  | Rdf_dt.HexBinary s -> s
+  |	Rdf_dt.Datetime dt -> Rdf_term.string_of_datetime dt
   | Rdf_dt.Ltrl (s,_) -> s
   | Rdf_dt.Ltrdt (s, _) -> s
 ;;
